@@ -1,0 +1,20 @@
+name: Notify Gitee Mirror
+
+on:
+  push:
+    branches: [main]
+  release:
+    types: [published, edited]
+  workflow_run:
+    workflows: ["Build Releases"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    uses: dqsq2e2/ting-reader/.github/workflows/gitee-mirror.yml@main
+    secrets:
+      GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
