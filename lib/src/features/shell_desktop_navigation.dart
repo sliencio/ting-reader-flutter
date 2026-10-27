@@ -6,18 +6,12 @@ class _DesktopSidebar extends StatelessWidget {
     required this.current,
     required this.collapsed,
     required this.onToggleCollapsed,
-    required this.pluginPages,
-    required this.activePluginPageId,
-    required this.onOpenPluginPage,
   });
 
   final ValueChanged<AppDestination> go;
   final AppDestination current;
   final bool collapsed;
   final VoidCallback onToggleCollapsed;
-  final List<ClientExtensionDescriptor> pluginPages;
-  final String? activePluginPageId;
-  final ValueChanged<ClientExtensionDescriptor> onOpenPluginPage;
 
   @override
   Widget build(BuildContext context) {
@@ -65,79 +59,21 @@ class _DesktopSidebar extends StatelessWidget {
                             onTap: () => go(AppDestination.downloads),
                           ),
                         ] else ...[
-                          _GroupLabel(
-                            l10n.navMainMenu,
-                            collapsed: collapsed,
-                          ),
+                          _GroupLabel(l10n.navMainMenu, collapsed: collapsed),
                           for (final entry in _navigationEntries(context))
                             _NavTile(
                               icon: entry.icon,
                               label: entry.label,
                               selected: _navigationSelected(
-                                  entry.destination, current),
+                                entry.destination,
+                                current,
+                              ),
                               collapsed: collapsed,
                               onTap: () => go(entry.destination),
                             ),
-                          if (appState.isAdmin) ...[
-                            const SizedBox(height: 32),
-                            _GroupLabel(
-                              l10n.navAdmin,
-                              collapsed: collapsed,
-                            ),
-                            for (final entry
-                                in _navigationEntries(context, admin: true))
-                              _NavTile(
-                                icon: entry.icon,
-                                label: entry.label,
-                                selected: _navigationSelected(
-                                    entry.destination, current),
-                                collapsed: collapsed,
-                                onTap: () => go(entry.destination),
-                              ),
-                          ],
-                          if (collapsed && pluginPages.isNotEmpty) ...[
-                            const SizedBox(height: 32),
-                            _GroupLabel(
-                              l10n.navPluginPages,
-                              collapsed: true,
-                            ),
-                            for (final extension in pluginPages)
-                              _PluginNavTile(
-                                extension: extension,
-                                selected:
-                                    current == AppDestination.pluginPage &&
-                                        activePluginPageId == extension.id,
-                                collapsed: true,
-                                onTap: () => onOpenPluginPage(extension),
-                              ),
-                          ],
                         ],
                       ]),
                     ),
-                    if (!offline && !collapsed && pluginPages.isNotEmpty)
-                      SliverFillRemaining(
-                        hasScrollBody: false,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.end,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const SizedBox(height: 32),
-                            _GroupLabel(
-                              l10n.navPluginPages,
-                              collapsed: false,
-                            ),
-                            for (final extension in pluginPages)
-                              _PluginNavTile(
-                                extension: extension,
-                                selected:
-                                    current == AppDestination.pluginPage &&
-                                        activePluginPageId == extension.id,
-                                collapsed: false,
-                                onTap: () => onOpenPluginPage(extension),
-                              ),
-                          ],
-                        ),
-                      ),
                   ],
                 ),
               ),
@@ -369,68 +305,6 @@ class _DesktopLogoutButton extends StatelessWidget {
       onPressed: onPressed,
       icon: const Icon(Icons.logout_rounded),
       label: Text(label),
-    );
-  }
-}
-
-class _PluginNavTile extends StatelessWidget {
-  const _PluginNavTile({
-    required this.extension,
-    required this.selected,
-    required this.collapsed,
-    required this.onTap,
-  });
-
-  final ClientExtensionDescriptor extension;
-  final bool selected;
-  final bool collapsed;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final foreground = selected ? Colors.white : context.mutedText;
-    final tile = Material(
-      color: selected ? AppColors.primary600 : Colors.transparent,
-      elevation: selected ? 8 : 0,
-      shadowColor: AppColors.primary500.withValues(alpha: 0.3),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: SizedBox(
-          height: 46,
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 16),
-            child: Row(
-              mainAxisAlignment: collapsed
-                  ? MainAxisAlignment.center
-                  : MainAxisAlignment.start,
-              children: [
-                PluginExtensionIcon(
-                  extension: extension,
-                  size: 20,
-                  color: foreground,
-                ),
-                if (!collapsed) ...[
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      extension.label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: foreground),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: collapsed ? Tooltip(message: extension.label, child: tile) : tile,
     );
   }
 }

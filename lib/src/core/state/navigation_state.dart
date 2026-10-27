@@ -7,6 +7,7 @@ enum AppDestination {
   search,
   favorites,
   mine,
+  account,
   history,
   bookmarks,
   playlists,
@@ -39,7 +40,7 @@ class ShellNavigation {
       'plugin-page' => AppDestination.pluginPage,
       final name =>
         AppDestination.values.where((item) => item.name == name).firstOrNull ??
-            AppDestination.home,
+            AppDestination.bookshelf,
     };
     state.initialPluginId = query['plugin'];
     state.initialCapabilityId = query['capability'];
@@ -56,7 +57,7 @@ class ShellNavigation {
     return state;
   }
 
-  AppDestination destination = AppDestination.home;
+  AppDestination destination = AppDestination.bookshelf;
   AppDestination searchOrigin = AppDestination.bookshelf;
   ({DetailDestination kind, String id, String? chapter})? _detail;
   String? aboutBackendVersion;
@@ -87,7 +88,7 @@ class ShellNavigation {
     _detail = (
       kind: kind,
       id: id,
-      chapter: kind == DetailDestination.book ? chapter : null
+      chapter: kind == DetailDestination.book ? chapter : null,
     );
     activePluginPage = null;
     activePluginLogs = null;
@@ -116,10 +117,11 @@ class ShellNavigation {
   }
 
   AppDestination? get backDestination => switch (destination) {
-        AppDestination.home => null,
+        AppDestination.bookshelf => null,
         AppDestination.pluginLogs => AppDestination.plugins,
         AppDestination.search => searchOrigin,
-        AppDestination.downloads ||
+        AppDestination.account ||
+        AppDestination.playlists ||
         AppDestination.favorites ||
         AppDestination.history ||
         AppDestination.bookmarks ||
@@ -129,7 +131,7 @@ class ShellNavigation {
         AppDestination.statistics ||
         AppDestination.about =>
           AppDestination.mine,
-        _ => AppDestination.home,
+        _ => AppDestination.bookshelf,
       };
 
   AppDestination get navDestination => switch (_detail?.kind) {
@@ -145,6 +147,7 @@ class ShellNavigation {
 
 bool isMineDestination(AppDestination destination) => switch (destination) {
       AppDestination.mine ||
+      AppDestination.account ||
       AppDestination.history ||
       AppDestination.bookmarks ||
       AppDestination.favorites ||

@@ -15,6 +15,7 @@ import 'mine/downloads_page.dart';
 import 'mine/favorites_page.dart';
 import 'mine/fn_connect_page.dart';
 import 'mine/mine_page.dart';
+import 'mine/listening_settings_page.dart';
 import 'mine/history_page.dart';
 import 'mine/bookmarks_page.dart';
 import 'mine/personalization/personalization_page.dart';
@@ -43,59 +44,64 @@ typedef _NavigationEntry = ({
   String label,
 });
 
-List<_NavigationEntry> _navigationEntries(BuildContext context,
-    {bool admin = false}) {
+List<_NavigationEntry> _navigationEntries(
+  BuildContext context, {
+  bool admin = false,
+}) {
   final l10n = context.l10n;
   return admin
       ? [
           (
             destination: AppDestination.libraries,
             icon: Icons.storage_rounded,
-            label: l10n.navLibraries
+            label: l10n.navLibraries,
           ),
           (
             destination: AppDestination.plugins,
             icon: Icons.extension_rounded,
-            label: l10n.navPlugins
+            label: l10n.navPlugins,
           ),
           (
             destination: AppDestination.logs,
             icon: Icons.terminal_rounded,
-            label: l10n.navLogs
+            label: l10n.navLogs,
           ),
           (
             destination: AppDestination.users,
             icon: Icons.group_rounded,
-            label: l10n.navUsers
+            label: l10n.navUsers,
           ),
         ]
       : [
           (
-            destination: AppDestination.home,
-            icon: Icons.home_rounded,
-            label: l10n.navHome
-          ),
-          (
             destination: AppDestination.bookshelf,
             icon: Icons.library_books_rounded,
-            label: l10n.navBookshelf
+            label: l10n.navBookshelf,
           ),
           (
-            destination: AppDestination.playlists,
-            icon: Icons.playlist_play_rounded,
-            label: l10n.navPlaylists
+            destination: AppDestination.downloads,
+            icon: Icons.download_outlined,
+            label: l10n.navDownloads,
           ),
           (
             destination: AppDestination.mine,
-            icon: Icons.person_rounded,
-            label: l10n.navMine
+            icon: Icons.settings_outlined,
+            label: context.localeText('设置', 'Settings'),
           ),
         ];
 }
 
 bool _navigationSelected(AppDestination target, AppDestination current) =>
     target == AppDestination.mine
-        ? isMineDestination(current)
+        ? current != AppDestination.downloads &&
+            (isMineDestination(current) ||
+                current == AppDestination.playlists ||
+                current == AppDestination.libraries ||
+                current == AppDestination.plugins ||
+                current == AppDestination.logs ||
+                current == AppDestination.users ||
+                current == AppDestination.pluginPage ||
+                current == AppDestination.pluginLogs)
         : target == AppDestination.bookshelf
             ? current == target || current == AppDestination.search
             : current == target;
@@ -192,7 +198,7 @@ class _AppShellState extends State<AppShell> {
       final active = AppScope.appOf(context);
       if ('${active.serverUrl}:${active.user?.id}' != identity) return;
       AppScope.playerOf(context).setExpanded(false);
-      _go(AppDestination.mine);
+      _go(AppDestination.account);
     });
   }
 
@@ -252,8 +258,10 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _openBook(String id) => _openBookAtChapter(id, null);
-  void _openBookAtChapter(String id, String? chapterId) => _navigate(() =>
-      _navigation.openDetail(DetailDestination.book, id, chapter: chapterId));
+  void _openBookAtChapter(String id, String? chapterId) => _navigate(
+        () => _navigation.openDetail(DetailDestination.book, id,
+            chapter: chapterId),
+      );
   void _openSeries(String id) =>
       _navigate(() => _navigation.openDetail(DetailDestination.series, id));
   void _openPlaylist(String id) =>
@@ -338,24 +346,21 @@ class _AppShellState extends State<AppShell> {
                                     appState.updateLocalSettings({
                                   'sidebar_collapsed': !sidebarCollapsed,
                                 }),
-                                pluginPages: _sidebarPluginPages,
-                                activePluginPageId: _activePluginPage?.id,
-                                onOpenPluginPage: _openPluginPage,
                               ),
                             Expanded(
-                              child: Column(
-                                children: [
-                                  if (!desktop)
-                                    _MobileHeader(
-                                      openMenu: _openMobileAdminDrawer,
-                                    ),
-                                  Expanded(child: _page()),
-                                  if (!desktop)
-                                    _BottomNav(
-                                      current: navDestination,
-                                      go: _go,
-                                    ),
-                                ],
+                              child: SafeArea(
+                                top: !desktop,
+                                bottom: false,
+                                child: Column(
+                                  children: [
+                                    Expanded(child: _page()),
+                                    if (!desktop)
+                                      _BottomNav(
+                                        current: navDestination,
+                                        go: _go,
+                                      ),
+                                  ],
+                                ),
                               ),
                             ),
                           ],
@@ -380,10 +385,10 @@ class _AppShellState extends State<AppShell> {
                           child: PluginExtensionHost(
                             bottomOffset: pluginExtensionBottom,
                             enabled: appState.pluginToolMenuEnabled &&
-                                _destination != AppDestination.pluginPage,
+                                _destination == AppDestination.plugins,
                           ),
                         ),
-                      if (!desktop && _mobileAdminDrawerOpen)
+                      if (_mobileAdminDrawerOpen)
                         Positioned.fill(
                           child: _MobileAdminOverlay(
                             go: _go,
@@ -476,7 +481,14 @@ class _AppShellState extends State<AppShell> {
           onBack: () => _go(AppDestination.mine),
         );
       case AppDestination.mine:
+        return ListeningSettingsPage(
+          go: _go,
+          openManagement: _openMobileAdminDrawer,
+          hasPluginPages: _sidebarPluginPages.isNotEmpty,
+        );
+      case AppDestination.account:
         return MyPage(
+          onBack: () => _go(AppDestination.mine),
           openHistory: () => _go(AppDestination.history),
           openBookmarks: () => _go(AppDestination.bookmarks),
           openFavorites: () => _go(AppDestination.favorites),
@@ -499,7 +511,7 @@ class _AppShellState extends State<AppShell> {
       case AppDestination.playlists:
         return PlaylistsPage(
           openPlaylist: _openPlaylist,
-          onBack: () => _go(AppDestination.home),
+          onBack: () => _go(AppDestination.mine),
         );
       case AppDestination.personalization:
         return PersonalizationPage(
@@ -513,7 +525,7 @@ class _AppShellState extends State<AppShell> {
       case AppDestination.statistics:
         return AdminStatisticsPage(onBack: () => _go(AppDestination.mine));
       case AppDestination.downloads:
-        return DownloadsPage(onBack: () => _go(AppDestination.mine));
+        return const DownloadsPage();
       case AppDestination.about:
         return AboutPage(
           backendVersion: _aboutBackendVersion,
@@ -550,7 +562,7 @@ class _AppShellState extends State<AppShell> {
         return PluginExtensionPage(
           key: ValueKey(extension.id),
           extension: extension,
-          onBack: () => _go(AppDestination.home),
+          onBack: () => _go(AppDestination.mine),
           extensionContext: <String, Object?>{
             'surface': ClientExtensionSlot.appSidebarPage.value,
             'user_id': user?.id,
@@ -640,10 +652,7 @@ class _GroupLabel extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
       child: Text(
         text,
-        style: const TextStyle(
-          color: AppColors.slate400,
-          fontSize: 12,
-        ),
+        style: const TextStyle(color: AppColors.slate400, fontSize: 12),
       ),
     );
   }

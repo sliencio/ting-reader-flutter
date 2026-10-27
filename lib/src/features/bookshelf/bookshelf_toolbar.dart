@@ -182,7 +182,7 @@ class _Header extends StatelessWidget {
                     if (mobile)
                       Flexible(flex: 10, child: modeButton)
                     else
-                      SizedBox(width: 136, child: modeButton),
+                      modeButton,
                     const SizedBox(width: 8),
                   ],
                   if (libraries.isNotEmpty)

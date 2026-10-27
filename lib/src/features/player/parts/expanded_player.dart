@@ -24,15 +24,16 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
   }
 
   Future<void> _openChapterSheet(
-      BuildContext context, PlayerState player, Color? themeColor) async {
+    BuildContext context,
+    PlayerState player,
+    Color? themeColor,
+  ) async {
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (sheetContext) => _ChapterSheetList(
-        player: player,
-        themeColor: themeColor,
-      ),
+      builder: (sheetContext) =>
+          _ChapterSheetList(player: player, themeColor: themeColor),
     );
   }
 
@@ -103,8 +104,10 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
 
     const referencePortraitHeight = 900.0;
     const referenceBottomPadding = 28.0;
-    final heightRatio =
-        (screenSize.height / referencePortraitHeight).clamp(0.0, 1.0);
+    final heightRatio = (screenSize.height / referencePortraitHeight).clamp(
+      0.0,
+      1.0,
+    );
     final scaledPadding = (referenceBottomPadding * heightRatio)
         .clamp(12.0, referenceBottomPadding)
         .toDouble();
@@ -220,8 +223,12 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
               ),
               SafeArea(
                 child: SingleChildScrollView(
-                  padding:
-                      EdgeInsets.fromLTRB(22, 18, 22, bottomContentPadding),
+                  padding: EdgeInsets.fromLTRB(
+                    22,
+                    18,
+                    22,
+                    bottomContentPadding,
+                  ),
                   child: Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 560),
@@ -238,7 +245,8 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                               Expanded(
                                 child: Padding(
                                   padding: const EdgeInsets.symmetric(
-                                      horizontal: 14),
+                                    horizontal: 14,
+                                  ),
                                   child: Column(
                                     children: [
                                       Text(
@@ -246,9 +254,7 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                         textAlign: TextAlign.center,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: const TextStyle(
-                                          fontSize: 17,
-                                        ),
+                                        style: const TextStyle(fontSize: 17),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
@@ -265,11 +271,43 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                   ),
                                 ),
                               ),
-                              _IconCircle(
-                                icon: Icons.settings_rounded,
-                                ghost: true,
-                                onPressed: () async =>
-                                    _openPlaybackSettings(player, book),
+                              PopupMenuButton<String>(
+                                tooltip: context.localeText('更多', 'More'),
+                                icon: const Icon(Icons.more_horiz_rounded),
+                                onSelected: (value) {
+                                  switch (value) {
+                                    case 'bookmarks':
+                                      _openBookmarks(player);
+                                      break;
+                                    case 'download':
+                                      _downloadCurrentChapter(player);
+                                      break;
+                                    case 'settings':
+                                      _openPlaybackSettings(player, book);
+                                      break;
+                                  }
+                                },
+                                itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                    value: 'bookmarks',
+                                    child: Text(
+                                      context.localeText('书签', 'Bookmarks'),
+                                    ),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'download',
+                                    child: Text(downloadAction.label),
+                                  ),
+                                  PopupMenuItem(
+                                    value: 'settings',
+                                    child: Text(
+                                      context.localeText(
+                                        '播放设置',
+                                        'Playback settings',
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -293,16 +331,14 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                   boxShadow: [
                                     BoxShadow(
                                       color: Colors.black.withValues(
-                                          alpha: context.isDark ? 0.44 : 0.18),
+                                        alpha: context.isDark ? 0.44 : 0.18,
+                                      ),
                                       blurRadius: 34,
                                       offset: const Offset(0, 22),
                                     ),
                                   ],
                                 ),
-                                child: CoverImage(
-                                  url: coverUrl,
-                                  radius: 24,
-                                ),
+                                child: CoverImage(url: coverUrl, radius: 24),
                               ),
                             ),
                           ),
@@ -342,8 +378,9 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                               decoration: BoxDecoration(
                                 color: const Color(0xfffff1f2),
                                 borderRadius: BorderRadius.circular(14),
-                                border:
-                                    Border.all(color: const Color(0xffffcdd5)),
+                                border: Border.all(
+                                  color: const Color(0xffffcdd5),
+                                ),
                               ),
                               child: Text(
                                 errorValue,
@@ -362,25 +399,11 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                 child: _QuickActionButton(
                                   icon: Icons.bolt_rounded,
                                   label: _formatPlaybackSpeed(
-                                      player.playbackSpeed),
+                                    player.playbackSpeed,
+                                  ),
                                   active: player.playbackSpeed != 1,
                                   onTapWithContext: (buttonContext) =>
                                       _openSpeedSheet(player, buttonContext),
-                                ),
-                              ),
-                              Expanded(
-                                child: _QuickActionButton(
-                                  icon: Icons.bookmark_add_outlined,
-                                  label: context.localeText('书签', 'Bookmarks'),
-                                  onTap: () => _openBookmarks(player),
-                                ),
-                              ),
-                              Expanded(
-                                child: _QuickActionButton(
-                                  icon: downloadAction.icon,
-                                  label: downloadAction.label,
-                                  active: downloadAction.active,
-                                  onTap: () => _downloadCurrentChapter(player),
                                 ),
                               ),
                               Expanded(
@@ -391,13 +414,16 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                       : player.sleepEpisodesRemaining != null
                                           ? context.localeText(
                                               '${player.sleepEpisodesRemaining} 集',
-                                              '${player.sleepEpisodesRemaining} ep')
+                                              '${player.sleepEpisodesRemaining} ep',
+                                            )
                                           : context.localeText('定时', 'Timer'),
                                   active: remaining != null ||
                                       player.sleepEpisodesRemaining != null,
                                   onTapWithContext: (buttonContext) =>
                                       _openSleepTimerSheet(
-                                          player, buttonContext),
+                                    player,
+                                    buttonContext,
+                                  ),
                                 ),
                               ),
                               Expanded(
@@ -405,7 +431,10 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                   icon: Icons.list_alt_rounded,
                                   label: context.localeText('选集', 'Chapters'),
                                   onTap: () => _openChapterSheet(
-                                      context, player, themeColor),
+                                    context,
+                                    player,
+                                    themeColor,
+                                  ),
                                 ),
                               ),
                             ],
@@ -451,16 +480,12 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                 const SizedBox(width: 10),
                                 Text(
                                   formatDurationShort(sliderValue),
-                                  style: TextStyle(
-                                    color: context.mutedText,
-                                  ),
+                                  style: TextStyle(color: context.mutedText),
                                 ),
                                 const Spacer(),
                                 Text(
                                   formatDurationShort(maxDuration),
-                                  style: TextStyle(
-                                    color: context.mutedText,
-                                  ),
+                                  style: TextStyle(color: context.mutedText),
                                 ),
                                 const SizedBox(width: 10),
                                 _SeekButton(

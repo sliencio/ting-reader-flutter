@@ -70,6 +70,8 @@ test/*
 !test/reading_ui_test.dart
 !test/playlist_layout_test.dart
 !test/default_admin_credentials_test.dart
+!test/listening_navigation_test.dart
+!test/continue_listening_test.dart
 preview_screenshots/
 real_compare_screenshots/
 web_compare_screenshots/

@@ -12,6 +12,7 @@ import '../../shared/cards/book_card.dart';
 import '../../shared/common/common_widgets.dart';
 import '../../shared/filter/display_filter_menu.dart';
 import 'book_delete_dialog.dart';
+import 'continue_listening.dart';
 
 part 'bookshelf_toolbar.dart';
 part 'bookshelf_content.dart';
@@ -36,6 +37,7 @@ class BookshelfPage extends StatefulWidget {
 
 class _BookshelfPageState extends State<BookshelfPage> {
   static const int _pageSize = 50;
+  int _refreshRevision = 0;
 
   BookshelfState? _shelf;
   bool get _loading => _shelf?.loading ?? true;
@@ -129,7 +131,12 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   Future<void> _load() async {
     await _shelf?.load();
-    if (mounted) setState(_resetVisibleItems);
+    if (mounted) {
+      setState(() {
+        _resetVisibleItems();
+        _refreshRevision++;
+      });
+    }
   }
 
   Future<void> _persist(String key, Object value) async {
@@ -142,19 +149,25 @@ class _BookshelfPageState extends State<BookshelfPage> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
           title: Text(context.localeText('确认标记未读', 'Mark as unread?')),
-          content: Text(context.localeText(
+          content: Text(
+            context.localeText(
               '将所选 ${_selectedBookIds.length} 本书标记为未读，同时清除这些书籍的全部播放进度。确定继续吗？',
-              'Mark the ${_selectedBookIds.length} selected books as unread and clear all their playback progress. Continue?')),
+              'Mark the ${_selectedBookIds.length} selected books as unread and clear all their playback progress. Continue?',
+            ),
+          ),
           actions: [
             TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: Text(context.l10n.commonCancel)),
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text(context.l10n.commonCancel),
+            ),
             FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: Text(context.localeText('标记未读', 'Mark as unread'))),
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text(context.localeText('标记未读', 'Mark as unread')),
+            ),
           ],
         ),
       );
@@ -170,9 +183,13 @@ class _BookshelfPageState extends State<BookshelfPage> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(context.localeText(
-                  '更新阅读状态失败：${ApiError.messageFor(error)}',
-                  'Failed to update read status: ${ApiError.messageFor(error)}'))),
+            content: Text(
+              context.localeText(
+                '更新阅读状态失败：${ApiError.messageFor(error)}',
+                'Failed to update read status: ${ApiError.messageFor(error)}',
+              ),
+            ),
+          ),
         );
       }
     } finally {
@@ -322,12 +339,19 @@ class _BookshelfPageState extends State<BookshelfPage> {
               : null,
         ),
         const SizedBox(height: 10),
+        if (!_selectionMode)
+          ContinueListening(
+            key: ValueKey(_refreshRevision),
+            openBook: widget.openBook,
+          ),
         if (!hasContent)
           EmptyState(
             icon: Icons.storage_rounded,
             title: context.localeText('书架空空如也', 'Your bookshelf is empty'),
-            message: context.localeText('您还没有添加任何存储库，或者存储库中还没有扫描到音频文件。',
-                'Add a library or scan audio files to start building your shelf.'),
+            message: context.localeText(
+              '您还没有添加任何存储库，或者存储库中还没有扫描到音频文件。',
+              'Add a library or scan audio files to start building your shelf.',
+            ),
             action: PrimaryButton(
               label: context.localeText('配置存储库', 'Configure Library'),
               icon: Icons.add_rounded,
@@ -474,8 +498,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
     if (visibleBookIds.isEmpty && visibleSeriesIds.isEmpty) return;
     setState(() {
       final allBooksSelected = visibleBookIds.every(_selectedBookIds.contains);
-      final allSeriesSelected =
-          visibleSeriesIds.every(_selectedSeriesIds.contains);
+      final allSeriesSelected = visibleSeriesIds.every(
+        _selectedSeriesIds.contains,
+      );
       if (allBooksSelected && allSeriesSelected) {
         _selectedBookIds.removeAll(visibleBookIds);
         _selectedSeriesIds.removeAll(visibleSeriesIds);
@@ -690,8 +715,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
     setState(() => _deletingSeries = true);
     try {
-      await _shelf?.operations
-          .deleteSeries(selectedSeries.map((series) => series.id));
+      await _shelf?.operations.deleteSeries(
+        selectedSeries.map((series) => series.id),
+      );
       return true;
     } catch (error) {
       if (!mounted) return false;
@@ -725,8 +751,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
     setState(() => _deletingBooks = true);
     try {
-      await _shelf?.operations.deleteBooks(selectedBooks.map((book) => book.id),
-          deleteFiles: confirmation.deleteSourceFiles);
+      await _shelf?.operations.deleteBooks(
+        selectedBooks.map((book) => book.id),
+        deleteFiles: confirmation.deleteSourceFiles,
+      );
       if (!mounted) return false;
       setState(() {
         _selectionMode = false;
@@ -740,8 +768,10 @@ class _BookshelfPageState extends State<BookshelfPage> {
       messenger.showSnackBar(
         SnackBar(
           content: Text(
-            context.localeText('删除书籍失败：${ApiError.messageFor(error)}',
-                'Failed to delete books: ${ApiError.messageFor(error)}'),
+            context.localeText(
+              '删除书籍失败：${ApiError.messageFor(error)}',
+              'Failed to delete books: ${ApiError.messageFor(error)}',
+            ),
           ),
         ),
       );
@@ -755,10 +785,12 @@ class _BookshelfPageState extends State<BookshelfPage> {
     final selectedBooks =
         _books.where((book) => _selectedBookIds.contains(book.id)).toList();
     if (selectedBooks.isEmpty) return;
-    final titleController =
-        TextEditingController(text: selectedBooks.first.title);
-    final authorController =
-        TextEditingController(text: selectedBooks.first.author ?? '');
+    final titleController = TextEditingController(
+      text: selectedBooks.first.title,
+    );
+    final authorController = TextEditingController(
+      text: selectedBooks.first.author ?? '',
+    );
     final descriptionController = TextEditingController();
 
     final created = await showDialog<bool>(
@@ -777,13 +809,15 @@ class _BookshelfPageState extends State<BookshelfPage> {
                     TextField(
                       controller: titleController,
                       decoration: InputDecoration(
-                          labelText: context.localeText('系列名称', 'Series Name')),
+                        labelText: context.localeText('系列名称', 'Series Name'),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
                       controller: authorController,
                       decoration: InputDecoration(
-                          labelText: context.localeText('作者', 'Author')),
+                        labelText: context.localeText('作者', 'Author'),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     TextField(
@@ -791,14 +825,17 @@ class _BookshelfPageState extends State<BookshelfPage> {
                       minLines: 2,
                       maxLines: 4,
                       decoration: InputDecoration(
-                          labelText: context.localeText('简介', 'Description')),
+                        labelText: context.localeText('简介', 'Description'),
+                      ),
                     ),
                     const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        context.localeText('已选 ${selectedBooks.length} 本书',
-                            '${selectedBooks.length} selected'),
+                        context.localeText(
+                          '已选 ${selectedBooks.length} 本书',
+                          '${selectedBooks.length} selected',
+                        ),
                         style: TextStyle(color: context.mutedText),
                       ),
                     ),

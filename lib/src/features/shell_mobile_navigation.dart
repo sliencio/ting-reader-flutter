@@ -1,60 +1,5 @@
 part of 'app_shell.dart';
 
-class _MobileHeader extends StatelessWidget {
-  const _MobileHeader({required this.openMenu});
-
-  final VoidCallback openMenu;
-
-  @override
-  Widget build(BuildContext context) {
-    final headerColor = Color.alphaBlend(
-      context.cardColor.withValues(alpha: 0.92),
-      Theme.of(context).scaffoldBackgroundColor,
-    );
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    return AnnotatedRegion<SystemUiOverlayStyle>(
-      value: SystemUiOverlayStyle(
-        statusBarColor: headerColor,
-        statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
-        statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
-        systemNavigationBarColor: Theme.of(context).scaffoldBackgroundColor,
-        systemNavigationBarIconBrightness:
-            isDark ? Brightness.light : Brightness.dark,
-        systemNavigationBarDividerColor: Colors.transparent,
-      ),
-      child: ColoredBox(
-        color: headerColor,
-        child: SafeArea(
-          bottom: false,
-          child: Container(
-            height: 64,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: headerColor,
-              border: Border(bottom: BorderSide(color: context.faintBorder)),
-            ),
-            child: Row(
-              children: [
-                Image.asset('assets/images/logo.png', width: 36, height: 36),
-                const SizedBox(width: 10),
-                const Text(
-                  'Ting Reader',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                ),
-                const Spacer(),
-                IconButton(
-                  onPressed: openMenu,
-                  icon: const Icon(Icons.menu_rounded),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 class _MobileAdminOverlay extends StatelessWidget {
   const _MobileAdminOverlay({
     required this.go,
@@ -198,13 +143,17 @@ class _MobileDrawer extends StatelessWidget {
                   children: [
                     if (appState.isAdmin) ...[
                       _GroupLabel(l10n.navAdmin),
-                      for (final entry
-                          in _navigationEntries(context, admin: true))
+                      for (final entry in _navigationEntries(
+                        context,
+                        admin: true,
+                      ))
                         _MobileAdminTile(
                           icon: entry.icon,
                           label: entry.label,
-                          selected:
-                              _navigationSelected(entry.destination, current),
+                          selected: _navigationSelected(
+                            entry.destination,
+                            current,
+                          ),
                           onTap: () {
                             onClose();
                             go(entry.destination);
@@ -434,10 +383,7 @@ class _DrawerAccountCard extends StatelessWidget {
 }
 
 class _BottomNav extends StatelessWidget {
-  const _BottomNav({
-    required this.current,
-    required this.go,
-  });
+  const _BottomNav({required this.current, required this.go});
 
   final AppDestination current;
   final ValueChanged<AppDestination> go;
@@ -445,7 +391,6 @@ class _BottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final offline = AppScope.appOf(context).offlineMode;
-    final l10n = context.l10n;
     return SafeArea(
       top: false,
       child: Container(
@@ -464,21 +409,13 @@ class _BottomNav extends StatelessWidget {
         child: Row(
           children: [
             for (final entry in _navigationEntries(context))
-              if (!offline ||
-                  entry.destination == AppDestination.home ||
-                  entry.destination == AppDestination.bookshelf)
-                _BottomItem(
-                  icon: entry.icon,
-                  label: entry.label,
-                  selected: _navigationSelected(entry.destination, current),
-                  onTap: offline ? null : () => go(entry.destination),
-                ),
-            if (offline)
               _BottomItem(
-                icon: Icons.download_done_rounded,
-                label: l10n.navDownloads,
-                selected: true,
-                onTap: () => go(AppDestination.downloads),
+                icon: entry.icon,
+                label: entry.label,
+                selected: offline
+                    ? entry.destination == AppDestination.downloads
+                    : _navigationSelected(entry.destination, current),
+                onTap: offline ? null : () => go(entry.destination),
               ),
           ],
         ),

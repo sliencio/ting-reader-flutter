@@ -27,6 +27,7 @@ class MyPage extends StatefulWidget {
     required this.openStatistics,
     required this.openAbout,
     required this.openBook,
+    this.onBack,
   });
 
   final VoidCallback openHistory;
@@ -39,6 +40,7 @@ class MyPage extends StatefulWidget {
   final VoidCallback openStatistics;
   final ValueChanged<String?> openAbout;
   final ValueChanged<String> openBook;
+  final VoidCallback? onBack;
 
   @override
   State<MyPage> createState() => _MyPageState();
@@ -134,10 +136,9 @@ class _MyPageState extends State<MyPage> {
 
       if (payload.isNotEmpty) {
         final response = await appState.api.patch('/api/me', data: payload);
-        await appState.updateCurrentUser(User.fromJson({
-          ...?currentUser?.toJson(),
-          ...asMap(response.data),
-        }));
+        await appState.updateCurrentUser(
+          User.fromJson({...?currentUser?.toJson(), ...asMap(response.data)}),
+        );
       }
 
       _passwordController.clear();
@@ -152,8 +153,10 @@ class _MyPageState extends State<MyPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content: Text(
-                context.l10n.mineUpdateFailed(ApiError.messageFor(error)))),
+          content: Text(
+            context.l10n.mineUpdateFailed(ApiError.messageFor(error)),
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _savingAccount = false);
@@ -169,14 +172,25 @@ class _MyPageState extends State<MyPage> {
     final user = appState.user;
     final username = user?.username ?? _usernameController.text;
     final listenedMinutes = (_recentPositionSeconds / 60).round();
-    final listenedDuration =
-        formatMinutesMetricForLocale(context, listenedMinutes);
+    final listenedDuration = formatMinutesMetricForLocale(
+      context,
+      listenedMinutes,
+    );
     final recentBookCount = _recentBookCount;
 
     final content = ListView(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: pagePaddingForWidth(MediaQuery.sizeOf(context).width),
       children: [
+        if (widget.onBack != null)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: widget.onBack,
+              icon: const Icon(Icons.arrow_back_rounded),
+              label: Text(context.localeText('返回设置', 'Back to settings')),
+            ),
+          ),
         Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 1024),
@@ -215,8 +229,10 @@ class _MyPageState extends State<MyPage> {
                     _EntryRow(
                       icon: Icons.bookmarks_outlined,
                       title: context.localeText('我的书签', 'My Bookmarks'),
-                      description: context.localeText('按书籍查看保存的位置和备注',
-                          'Saved positions and notes, grouped by book'),
+                      description: context.localeText(
+                        '按书籍查看保存的位置和备注',
+                        'Saved positions and notes, grouped by book',
+                      ),
                       color: Colors.amber.shade700,
                       backgroundColor: Colors.amber.shade50,
                       onTap: widget.openBookmarks,
@@ -224,8 +240,9 @@ class _MyPageState extends State<MyPage> {
                     _EntryRow(
                       icon: Icons.favorite_border_rounded,
                       title: l10n.mineFavoritesTitle,
-                      description:
-                          l10n.mineFavoritesDescription(_favorites.length),
+                      description: l10n.mineFavoritesDescription(
+                        _favorites.length,
+                      ),
                       color: Colors.red.shade500,
                       backgroundColor: Colors.red.shade50,
                       onTap: widget.openFavorites,
@@ -292,9 +309,7 @@ class _MyPageState extends State<MyPage> {
                   label: Text(l10n.mineAboutTitle),
                   style: TextButton.styleFrom(
                     foregroundColor: context.mutedText,
-                    textStyle: const TextStyle(
-                      fontSize: 14,
-                    ),
+                    textStyle: const TextStyle(fontSize: 14),
                   ),
                 ),
                 Text(
@@ -363,8 +378,9 @@ class _AccountProfileCard extends StatelessWidget {
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black
-                    .withValues(alpha: context.isDark ? 0.16 : 0.05),
+                color: Colors.black.withValues(
+                  alpha: context.isDark ? 0.16 : 0.05,
+                ),
                 blurRadius: 12,
                 offset: const Offset(0, 3),
               ),
@@ -596,10 +612,7 @@ class _SaveAccountButton extends StatelessWidget {
         if (saved) ...[
           Text(
             context.l10n.mineAccountUpdated,
-            style: TextStyle(
-              color: Colors.green.shade600,
-              fontSize: 14,
-            ),
+            style: TextStyle(color: Colors.green.shade600, fontSize: 14),
           ),
           const SizedBox(width: 12),
         ],
@@ -617,8 +630,9 @@ class _SaveAccountButton extends StatelessWidget {
                     ),
                   )
                 : const Icon(Icons.save_outlined, size: 18),
-            label:
-                Text(saving ? context.l10n.mineSaving : context.l10n.mineSave),
+            label: Text(
+              saving ? context.l10n.mineSaving : context.l10n.mineSave,
+            ),
             style: ElevatedButton.styleFrom(
               elevation: 8,
               shadowColor: AppColors.primary500.withValues(alpha: 0.22),
@@ -628,9 +642,7 @@ class _SaveAccountButton extends StatelessWidget {
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
-              textStyle: const TextStyle(
-                fontSize: 14,
-              ),
+              textStyle: const TextStyle(fontSize: 14),
             ),
           ),
         ),
@@ -681,22 +693,13 @@ class _SummaryCard extends StatelessWidget {
                 ),
                 TextSpan(
                   text: ' $unit',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: context.mutedText,
-                  ),
+                  style: TextStyle(fontSize: 12, color: context.mutedText),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 8),
-          Text(
-            label,
-            style: TextStyle(
-              color: context.mutedText,
-              fontSize: 12,
-            ),
-          ),
+          Text(label, style: TextStyle(color: context.mutedText, fontSize: 12)),
         ],
       ),
     );
@@ -714,10 +717,7 @@ class _MySectionTitle extends StatelessWidget {
       padding: const EdgeInsets.only(left: 4),
       child: Text(
         title,
-        style: TextStyle(
-          color: context.mutedText,
-          fontSize: 14,
-        ),
+        style: TextStyle(color: context.mutedText, fontSize: 14),
       ),
     );
   }
@@ -812,10 +812,7 @@ class _EntryRow extends StatelessWidget {
                       title,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        height: 1.15,
-                      ),
+                      style: const TextStyle(fontSize: 16, height: 1.15),
                     ),
                     const SizedBox(height: 4),
                     Text(
