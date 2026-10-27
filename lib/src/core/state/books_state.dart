@@ -262,10 +262,67 @@ class ChapterCatalogue {
   }
 }
 
+typedef _BookDetailSnapshot = ({
+  Book book,
+  ProgressItem? progress,
+  Map<String, dynamic> settings,
+  List<Chapter> chapters,
+  int total,
+  int mainTotal,
+  int extraTotal,
+  String tab,
+  int group,
+  bool ascending,
+  bool groupsDescending
+});
+
+class BookDetailsCache {
+  final _entries = <String, _BookDetailSnapshot>{};
+  int revision = 0;
+
+  _BookDetailSnapshot? _read(String key) {
+    final value = _entries.remove(key);
+    if (value != null) _entries[key] = value;
+    return value;
+  }
+
+  void _write(String key, _BookDetailSnapshot value) {
+    _entries.remove(key);
+    _entries[key] = value;
+    if (_entries.length > 24) _entries.remove(_entries.keys.first);
+  }
+
+  void clear() {
+    _entries.clear();
+    revision++;
+  }
+}
+
 class BookDetailState extends ChangeNotifier {
-  BookDetailState(this.api, this.bookId)
+  BookDetailState(this.api, this.bookId, {this.cache, String? cacheKey})
       : catalogue = ChapterCatalogue(api, bookId),
-        operations = BookOperations(api);
+        operations = BookOperations(api),
+        cacheKey = cacheKey ?? bookId,
+        _cacheRevision = cache?.revision ?? 0 {
+    final saved = cache?._read(this.cacheKey);
+    if (saved == null) return;
+    book = saved.book;
+    progress = saved.progress;
+    settings = Map.of(saved.settings);
+    chapters = List.of(saved.chapters);
+    total = saved.total;
+    mainTotal = saved.mainTotal;
+    extraTotal = saved.extraTotal;
+    tab = saved.tab;
+    group = saved.group;
+    ascending = saved.ascending;
+    groupsDescending = saved.groupsDescending;
+    groupOrders = readChapterGroupOrders(settings);
+    loading = false;
+  }
+  final BookDetailsCache? cache;
+  final int _cacheRevision;
+  final String cacheKey;
   final ApiClient api;
   final String bookId;
   final ChapterCatalogue catalogue;
@@ -292,7 +349,28 @@ class BookDetailState extends ChangeNotifier {
   bool _favoritePending = false;
 
   void _notify() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    final current = book;
+    if (current != null &&
+        !loading &&
+        !pageLoading &&
+        error == null &&
+        cache?.revision == _cacheRevision) {
+      cache?._write(cacheKey, (
+        book: current,
+        progress: progress,
+        settings: Map.of(settings),
+        chapters: List.of(chapters),
+        total: total,
+        mainTotal: mainTotal,
+        extraTotal: extraTotal,
+        tab: tab,
+        group: group,
+        ascending: ascending,
+        groupsDescending: groupsDescending
+      ));
+    }
+    notifyListeners();
   }
 
   Future<void> load({String? initialChapter}) async {
@@ -303,7 +381,8 @@ class BookDetailState extends ChangeNotifier {
     catalogue.invalidate();
     final token = CancelToken();
     _loadToken = token;
-    loading = true;
+    final hadContent = book != null;
+    loading = !hadContent;
     error = null;
     _notify();
     try {
@@ -327,13 +406,16 @@ class BookDetailState extends ChangeNotifier {
           (book?.libraryType == 'rss' ? 'desc' : 'asc');
       ascending = order == 'asc';
       groupsDescending = !ascending;
-      tab = 'main';
-      group = 0;
-      chapters = [];
-      total = mainTotal = extraTotal = 0;
+      if (!hadContent) {
+        tab = 'main';
+        group = 0;
+        chapters = [];
+        total = mainTotal = extraTotal = 0;
+      }
       await loadPage(
           target: initialChapter,
-          preferLast: groupsDescending && initialChapter == null);
+          preferLast:
+              groupsDescending && initialChapter == null && !hadContent);
     } catch (failure) {
       if (!_disposed && !token.isCancelled) {
         error = ApiError.messageFor(failure);

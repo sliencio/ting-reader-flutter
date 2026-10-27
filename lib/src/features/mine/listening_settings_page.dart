@@ -4,18 +4,46 @@ import '../../core/state/navigation_state.dart';
 import '../../core/utils/locale.dart';
 import '../../shared/app_scope.dart';
 import '../../shared/common/common_widgets.dart';
+import '../../core/services/desktop_window.dart';
+import '../../core/api/api_error.dart';
 
-class ListeningSettingsPage extends StatelessWidget {
+class ListeningSettingsPage extends StatefulWidget {
   const ListeningSettingsPage({
     super.key,
     required this.go,
     required this.openManagement,
     required this.hasPluginPages,
+    required this.forceRefresh,
   });
 
   final ValueChanged<AppDestination> go;
   final VoidCallback openManagement;
   final bool hasPluginPages;
+  final Future<void> Function() forceRefresh;
+
+  @override
+  State<ListeningSettingsPage> createState() => _ListeningSettingsPageState();
+}
+
+class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
+  bool _refreshing = false;
+  ValueChanged<AppDestination> get go => widget.go;
+  VoidCallback get openManagement => widget.openManagement;
+  bool get hasPluginPages => widget.hasPluginPages;
+
+  Future<void> _refresh() async {
+    setState(() => _refreshing = true);
+    try {
+      await widget.forceRefresh();
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(ApiError.messageFor(error))));
+      }
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -53,6 +81,58 @@ class ListeningSettingsPage extends StatelessWidget {
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             const SizedBox(height: 24),
+            if (DesktopWindow.instance.supported)
+              group([
+                ListTile(
+                    leading: const Icon(Icons.picture_in_picture_alt_rounded),
+                    title: Text(context.localeText('小窗模式', 'Mini window')),
+                    subtitle: Text(context.localeText(
+                        '置顶显示播放器', 'Keep the player on top')),
+                    onTap: () => DesktopWindow.instance.setMini(true)),
+                Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: DropdownButtonFormField<String>(
+                      key: ValueKey(app.settings['desktop_close_behavior']),
+                      initialValue:
+                          app.settings['desktop_close_behavior']?.toString() ??
+                              'ask',
+                      decoration: InputDecoration(
+                          labelText: context.localeText(
+                              '点击关闭按钮时', 'When closing the window')),
+                      items: [
+                        DropdownMenuItem(
+                            value: 'ask',
+                            child: Text(
+                                context.localeText('每次询问', 'Ask every time'))),
+                        DropdownMenuItem(
+                            value: 'exit',
+                            child: Text(context.localeText('直接退出', 'Exit'))),
+                        DropdownMenuItem(
+                            value: 'minimize',
+                            child: Text(context.localeText(
+                                '最小化到任务栏', 'Minimize to taskbar'))),
+                      ],
+                      onChanged: (value) async {
+                        if (value != null) {
+                          await app.updateLocalSettings(
+                              {'desktop_close_behavior': value});
+                        }
+                      },
+                    )),
+              ]),
+            group([
+              ListTile(
+                  leading: _refreshing
+                      ? const SizedBox(
+                          width: 24,
+                          height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.sync_rounded),
+                  title: Text(context.localeText('强制刷新', 'Force refresh')),
+                  subtitle: Text(context.localeText('清除书架与详情缓存，重新获取服务端信息',
+                      'Clear shelf and detail caches and reload server data')),
+                  onTap: _refreshing ? null : _refresh),
+            ]),
             group([
               entry(
                 Icons.tune_rounded,

@@ -78,7 +78,10 @@ class _BookDetailPageState extends State<BookDetailPage> {
   }
 
   void _bindDetail() {
-    _detail = BookDetailState(AppScope.appOf(context).api, widget.bookId)
+    final app = AppScope.appOf(context);
+    _detail = BookDetailState(app.api, widget.bookId,
+        cache: app.bookDetailsCache,
+        cacheKey: '${app.serverUrl}:${app.user?.id}:${widget.bookId}')
       ..addListener(_detailChanged);
     _load();
   }
@@ -338,7 +341,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
   @override
   Widget build(BuildContext context) {
     if (_loading) return const LoadingView();
-    if (_detail?.error != null) {
+    if (_detail?.error != null && _book == null) {
       return PageListView(children: [
         AppBackButton(onPressed: widget.onBack),
         LoadErrorView(onRetry: _load),
@@ -385,6 +388,11 @@ class _BookDetailPageState extends State<BookDetailPage> {
       onRefresh: _load,
       children: [
         _DetailBackButton(onPressed: widget.onBack),
+        if (_detail?.error != null)
+          Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: Text(context.localeText('当前显示缓存，刷新失败，可下拉重试',
+                  'Showing cached details. Pull to refresh and retry.'))),
         const SizedBox(height: 32),
         LayoutBuilder(
           builder: (context, constraints) {

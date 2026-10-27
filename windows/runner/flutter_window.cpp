@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -27,6 +28,32 @@ bool FlutterWindow::OnCreate() {
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
+  window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "ting_reader/window",
+      &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        const auto& method = call.method_name();
+        if (method == "setMiniMode") {
+          const auto* value = std::get_if<bool>(call.arguments());
+          if (!value) { result->Error("arguments", "小窗参数无效"); return; }
+          SetMiniMode(*value);
+        } else if (method == "setCloseBehavior") {
+          const auto* value = std::get_if<std::string>(call.arguments());
+          if (!value) { result->Error("arguments", "关闭行为无效"); return; }
+          close_behavior_ = *value;
+        } else if (method == "minimize") {
+          ShowWindow(GetHandle(), SW_MINIMIZE);
+        } else if (method == "exit") {
+          close_behavior_ = "exit";
+          PostMessage(GetHandle(), WM_CLOSE, 0, 0);
+        } else {
+          result->NotImplemented();
+          return;
+        }
+        result->Success();
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
   });
@@ -40,6 +67,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  window_channel_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -51,6 +79,16 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == WM_CLOSE) {
+    if (close_behavior_ == "minimize") {
+      ShowWindow(hwnd, SW_MINIMIZE);
+      return 0;
+    }
+    if (close_behavior_ != "exit" && window_channel_) {
+      window_channel_->InvokeMethod("closeRequested", nullptr);
+      return 0;
+    }
+  }
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =
@@ -68,4 +106,23 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+}
+
+void FlutterWindow::SetMiniMode(bool enabled) {
+  if (mini_mode_ == enabled) return;
+  const HWND window = GetHandle();
+  if (enabled) {
+    GetWindowPlacement(window, &normal_placement_);
+    ShowWindow(window, SW_RESTORE);
+    RECT bounds;
+    GetWindowRect(window, &bounds);
+    const auto dpi = GetDpiForWindow(window);
+    SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
+                 MulDiv(400, dpi, 96), MulDiv(260, dpi, 96), SWP_SHOWWINDOW);
+  } else {
+    SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPlacement(window, &normal_placement_);
+  }
+  mini_mode_ = enabled;
 }

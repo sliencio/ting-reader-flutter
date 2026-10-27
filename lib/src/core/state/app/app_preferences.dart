@@ -38,6 +38,7 @@ class _AppPreferences {
     'resume_after_interruption',
     'sidebar_collapsed',
     'player_volume',
+    'desktop_close_behavior',
   };
   static const _obsoleteLocalSettingKeys = <String>{
     'resume_after_interruption',

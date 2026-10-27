@@ -18,6 +18,8 @@ import 'package:ting_reader_flutter/src/features/mine/bookmarks_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/history_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/mine_page.dart';
 import 'package:ting_reader_flutter/src/features/player/mini_player.dart';
+import 'package:ting_reader_flutter/src/features/player/small_player_window.dart';
+import 'package:flutter/foundation.dart';
 import 'package:ting_reader_flutter/src/features/login_page.dart';
 import 'package:ting_reader_flutter/src/features/admin/users/admin_users_page.dart';
 import 'package:ting_reader_flutter/src/features/bookshelf/book_picker_dialog.dart';
@@ -347,6 +349,10 @@ class _ReadingPlayer extends ChangeNotifier implements PlayerState {
   double playbackSpeed = 1;
   @override
   bool isMiniCollapsed = false;
+  @override
+  bool get hasChapter => currentBook != null && currentChapter != null;
+  @override
+  List<Chapter> get chapters => currentChapter == null ? [] : [currentChapter!];
 
   @override
   Future<void> playChapter(Book book, List<Chapter> chapters, Chapter chapter,
@@ -377,15 +383,15 @@ Future<void> _pump(
     {bool settle = true}) async {
   final downloads = DownloadState(app);
   addTearDown(downloads.dispose);
-  await tester.pumpWidget(MaterialApp(
-    locale: const Locale('en'),
-    localizationsDelegates: AppLocalizations.localizationsDelegates,
-    supportedLocales: AppLocalizations.supportedLocales,
-    home: AppScope(
-      appState: app,
-      downloadState: downloads,
-      playerState: player,
-      child: Scaffold(body: child),
+  await tester.pumpWidget(AppScope(
+    appState: app,
+    downloadState: downloads,
+    playerState: player,
+    child: MaterialApp(
+      locale: const Locale('en'),
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(body: child),
     ),
   ));
   if (settle) {
@@ -800,6 +806,56 @@ void main() {
         asMap(app.api.settingsPayload['settings_json'])['bookshelf_view_mode'],
         'list');
     expect(find.byType(BookshelfListTile), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  for (final width in [320.0, 390.0, 600.0, 840.0, 1024.0, 1440.0]) {
+    testWidgets('Windows playback bar keeps chapter access at $width',
+        (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = Size(width, 700);
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final app = _ReadingApp();
+      final player = _ReadingPlayer()
+        ..currentBook = book
+        ..currentChapter = chapter;
+      addTearDown(app.dispose);
+      addTearDown(player.dispose);
+      await _pump(tester, app, player, const MiniPlayer());
+      expect(find.byTooltip('Chapters'), findsOneWidget);
+      if (width >= 840) {
+        expect(find.byTooltip('Mini window'), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byTooltip('Chapters'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byType(BottomSheet), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
+
+  testWidgets('small player fits a compact native window', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(400, 220);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final app = _ReadingApp();
+    final player = _ReadingPlayer()
+      ..currentBook = book
+      ..currentChapter = chapter;
+    addTearDown(app.dispose);
+    addTearDown(player.dispose);
+    var opened = false;
+    await _pump(tester, app, player,
+        SmallPlayerWindow(openChapters: () async => opened = true));
+    await tester.tap(find.byTooltip('Chapters'));
+    await tester.pump();
+    expect(opened, isTrue);
     expect(tester.takeException(), isNull);
   });
 

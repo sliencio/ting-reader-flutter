@@ -8,6 +8,7 @@ import '../../core/models/models.dart';
 import '../../core/state/app_state.dart';
 import '../../core/state/download_state.dart';
 import '../../core/state/player_state.dart';
+import '../../core/services/desktop_window.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/chapter_sort.dart';
 import '../../core/utils/formatters.dart';
@@ -25,6 +26,18 @@ part 'parts/expanded_player.dart';
 part 'parts/playback_menus.dart';
 part 'parts/player_controls.dart';
 part 'parts/theme_utils.dart';
+
+Future<void> showPlayerChapters(
+    BuildContext context, PlayerState player) async {
+  await showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => _ChapterSheetList(
+        player: player,
+        themeColor: effectiveBookThemeColor(player.currentBook?.themeColor)),
+  );
+}
 
 class MiniPlayer extends StatefulWidget {
   const MiniPlayer({super.key});
@@ -134,7 +147,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                     final centerHorizontalPadding =
                         constraints.maxWidth >= 1024 ? 24.0 : 12.0;
                     final rightWidth =
-                        constraints.maxWidth >= 1024 ? 140.0 : 100.0;
+                        constraints.maxWidth >= 1024 ? 220.0 : 180.0;
                     final row = Row(
                       children: [
                         GestureDetector(
@@ -287,6 +300,24 @@ class _MiniPlayerState extends State<MiniPlayer> {
                               mainAxisSize: MainAxisSize.min,
                               mainAxisAlignment: MainAxisAlignment.end,
                               children: [
+                                IconButton(
+                                  tooltip:
+                                      context.localeText('章节列表', 'Chapters'),
+                                  icon: Icon(Icons.queue_music_rounded,
+                                      color: subduedAccent),
+                                  onPressed: () =>
+                                      showPlayerChapters(context, player),
+                                ),
+                                if (DesktopWindow.instance.supported)
+                                  IconButton(
+                                    tooltip: context.localeText(
+                                        '小窗模式', 'Mini window'),
+                                    icon: Icon(
+                                        Icons.picture_in_picture_alt_rounded,
+                                        color: subduedAccent),
+                                    onPressed: () =>
+                                        DesktopWindow.instance.setMini(true),
+                                  ),
                                 _MiniIconButton(
                                   icon: player.volume <= 0
                                       ? Icons.volume_off_rounded
@@ -358,6 +389,14 @@ class _MiniPlayerState extends State<MiniPlayer> {
                             filledIconColor: onAccent,
                           ),
                           SizedBox(width: veryTiny ? 14 : 16),
+                          IconButton(
+                            tooltip: context.localeText('章节列表', 'Chapters'),
+                            icon: Icon(Icons.queue_music_rounded,
+                                color: subduedAccent),
+                            onPressed: () =>
+                                showPlayerChapters(context, player),
+                            visualDensity: VisualDensity.compact,
+                          ),
                           _MiniCollapseButton(
                             icon: Icons.chevron_left_rounded,
                             color: subduedAccent,

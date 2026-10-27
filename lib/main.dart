@@ -14,6 +14,65 @@ import 'src/core/utils/locale.dart';
 import 'src/features/app_shell.dart';
 import 'src/shared/app_scope.dart';
 import 'src/shared/common/common_widgets.dart';
+import 'src/core/services/desktop_window.dart';
+import 'src/features/player/small_player_window.dart';
+import 'src/features/player/mini_player.dart';
+
+final _appNavigatorKey = GlobalKey<NavigatorState>();
+bool _closeDialogOpen = false;
+
+Future<void> _handleWindowClose(AppState app) async {
+  if (_closeDialogOpen) return;
+  _closeDialogOpen = true;
+  try {
+    if (DesktopWindow.instance.isMini) {
+      await DesktopWindow.instance.setMini(false);
+    }
+    final context = _appNavigatorKey.currentContext;
+    if (context == null || !context.mounted) return;
+    var remember = false;
+    final action = await showDialog<String>(
+        context: context,
+        builder: (context) => StatefulBuilder(
+            builder: (context, update) => AlertDialog(
+                  title: Text(context.localeText('关闭听悦', 'Close Ting Reader')),
+                  content: CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                          context.localeText('记住我的选择', 'Remember my choice')),
+                      value: remember,
+                      onChanged: (value) =>
+                          update(() => remember = value ?? false)),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text(context.localeText('取消', 'Cancel'))),
+                    OutlinedButton(
+                        onPressed: () => Navigator.pop(context, 'minimize'),
+                        child: Text(context.localeText('最小化', 'Minimize'))),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(context, 'exit'),
+                        child: Text(context.localeText('退出', 'Exit'))),
+                  ],
+                )));
+    if (action == null) return;
+    if (remember) {
+      await app.updateLocalSettings({'desktop_close_behavior': action});
+    }
+    if (action == 'minimize') {
+      await DesktopWindow.instance.minimize();
+    } else {
+      if (context.mounted) {
+        await AppScope.playerOf(context)
+            .sendProgress()
+            .timeout(const Duration(seconds: 2), onTimeout: () {});
+      }
+      await DesktopWindow.instance.exit();
+    }
+  } finally {
+    _closeDialogOpen = false;
+  }
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,6 +82,8 @@ Future<void> main() async {
   await _requestNotificationPermission();
 
   final appState = AppState();
+  await DesktopWindow.instance.initialize(appState);
+  DesktopWindow.instance.onCloseRequested = () => _handleWindowClose(appState);
   final downloadState = DownloadState(appState);
   final playerState = PlayerState(appState, downloadState);
 
@@ -91,6 +152,7 @@ class TingReaderApp extends StatelessWidget {
       animation: appState,
       builder: (context, _) {
         return MaterialApp(
+          navigatorKey: _appNavigatorKey,
           title: 'Ting Reader',
           debugShowCheckedModeBanner: false,
           theme: AppTheme.light,
@@ -100,7 +162,34 @@ class TingReaderApp extends StatelessWidget {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           builder: (context, child) {
-            final content = child ?? const SizedBox.shrink();
+            final content = AnimatedBuilder(
+              animation: DesktopWindow.instance,
+              builder: (context, _) {
+                final window = DesktopWindow.instance;
+                if (!window.isMini) {
+                  window.normalSize = MediaQuery.sizeOf(context);
+                }
+                return Stack(fit: StackFit.expand, children: [
+                  Offstage(
+                      offstage: window.isMini,
+                      child: OverflowBox(
+                          minWidth: window.normalSize.width,
+                          maxWidth: window.normalSize.width,
+                          minHeight: window.normalSize.height,
+                          maxHeight: window.normalSize.height,
+                          child: child ?? const SizedBox.shrink())),
+                  if (window.isMini)
+                    SmallPlayerWindow(openChapters: () async {
+                      await window.setMini(false);
+                      final context = _appNavigatorKey.currentContext;
+                      if (context != null && context.mounted) {
+                        await showPlayerChapters(
+                            context, AppScope.playerOf(context));
+                      }
+                    }),
+                ]);
+              },
+            );
             final brightness = Theme.of(context).brightness;
             final isDark = brightness == Brightness.dark;
             final background = Theme.of(context).scaffoldBackgroundColor;

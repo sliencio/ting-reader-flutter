@@ -19,6 +19,7 @@ import '../utils/client_device_headers.dart';
 import '../utils/application_time_zone.dart' as app_time_zone;
 import '../utils/locale.dart';
 import '../utils/local_network.dart';
+import 'books_state.dart';
 
 part 'app/app_state_models.dart';
 part 'app/app_state_credentials.dart';
@@ -40,6 +41,7 @@ bool _isFnosGatewayModeValue(Object? value) {
 }
 
 class AppState extends ChangeNotifier {
+  final bookDetailsCache = BookDetailsCache();
   AppState({FnConnectClient? fnConnect, FlutterSecureStorage? secureStorage})
       : _ownsFnConnect = fnConnect == null,
         fnConnect = fnConnect ?? FnConnectClient(),

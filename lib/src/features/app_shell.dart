@@ -254,6 +254,23 @@ class _AppShellState extends State<AppShell> {
   void _openAbout(String? version) =>
       _navigate(() => _navigation.openAbout(version));
 
+  Future<void> _forceRefresh() async {
+    final app = AppScope.appOf(context);
+    await app.loadSettings();
+    if (!mounted) return;
+    app.bookDetailsCache.clear();
+    PaintingBinding.instance.imageCache
+      ..clear()
+      ..clearLiveImages();
+    setState(_primaryPages.clear);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(
+            16, 0, 16, AppScope.playerOf(context).hasChapter ? 180 : 84),
+        content: Text(context.localeText('缓存已清除，下次打开将从服务端重新加载',
+            'Cache cleared. Pages will reload from the server.'))));
+  }
+
   void _openMobileAdminDrawer() {
     setState(() => _mobileAdminDrawerOpen = true);
   }
@@ -432,7 +449,8 @@ class _AppShellState extends State<AppShell> {
 
   Widget _page() {
     final app = AppScope.appOf(context);
-    final identity = '${app.serverUrl}:${app.user?.id}:${app.offlineMode}';
+    final identity =
+        '${app.serverUrl}:${app.user?.id}:${app.offlineMode}:${app.bookDetailsCache.revision}';
     if (_pageIdentity != identity) {
       _primaryPages.clear();
       _pageIdentity = identity;
@@ -526,6 +544,7 @@ class _AppShellState extends State<AppShell> {
         );
       case AppDestination.mine:
         return ListeningSettingsPage(
+          forceRefresh: _forceRefresh,
           go: _go,
           openManagement: _openMobileAdminDrawer,
           hasPluginPages: _sidebarPluginPages.isNotEmpty,

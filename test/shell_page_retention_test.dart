@@ -80,6 +80,22 @@ Future<(_App, _Player)> _pump(WidgetTester tester, Size size) async {
 }
 
 void main() {
+  testWidgets('force refresh discards retained shelf and details',
+      (tester) async {
+    final (app, _) = await _pump(tester, const Size(390, 844));
+    final shelf = tester.state(find.byType(BookshelfPage));
+    final revision = app.bookDetailsCache.revision;
+    await tester.tap(find.text('Settings'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Force refresh'));
+    await tester.pumpAndSettle();
+    expect(app.bookDetailsCache.revision, revision + 1);
+    await tester.tap(find.text('Bookshelf'));
+    await tester.pumpAndSettle();
+    expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   for (final size in [const Size(390, 844), const Size(1440, 1000)]) {
     testWidgets(
         'tab switches preserve pages without repeating requests at $size',
