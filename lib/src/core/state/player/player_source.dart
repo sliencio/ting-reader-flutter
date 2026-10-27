@@ -2,6 +2,51 @@ part of '../player_state.dart';
 
 /// Audio source construction, local downloads and notification metadata.
 extension _PlayerSources on PlayerState {
+  bool _canReuseAudioQueue(Book book, List<Chapter> nextChapters) {
+    if (!_usingAudioQueue ||
+        _usingTranscodeStream ||
+        !identical(currentBook, book) ||
+        _mediaAuthRevision != appState.api.authRevision ||
+        chapters.length != nextChapters.length) {
+      return false;
+    }
+    for (var index = 0; index < chapters.length; index++) {
+      if (chapters[index].id != nextChapters[index].id ||
+          chapters[index].path != nextChapters[index].path) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  Future<bool> _seekExistingAudioQueue(
+    Chapter chapter,
+    int index, {
+    required String? localPath,
+    required double position,
+  }) async {
+    final queue = _audio.audioSource;
+    if (queue is! audio.ConcatenatingAudioSource ||
+        index < 0 ||
+        index >= queue.children.length) {
+      return false;
+    }
+    final source = queue.children[index];
+    final expected = localPath == null
+        ? Uri.parse(streamUrl(chapter.id))
+        : Uri.file(localPath);
+    if (source is! audio.UriAudioSource || source.uri != expected) return false;
+    try {
+      // 音源和鉴权未变时直接切换队列索引，不重新加载整本书。
+      await _audio.seek(Duration(milliseconds: (position * 1000).round()),
+          index: index);
+      return true;
+    } catch (_) {
+      // 原生后端不支持队列跳转时，回退到原有的音源加载流程。
+      return false;
+    }
+  }
+
   String _buildStreamUrl(
     String chapterId, {
     String? transcodeFormat,

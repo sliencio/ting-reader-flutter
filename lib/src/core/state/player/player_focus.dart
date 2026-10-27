@@ -244,7 +244,7 @@ extension _PlayerAudioFocus on PlayerState {
 
   Future<bool> _playWithSession({
     bool Function()? stillAllowed,
-    bool waitForCompletion = true,
+    bool waitForCompletion = false,
   }) async {
     if (_disposed) return false;
     if (_gatewayReauthenticationPending) {
@@ -263,14 +263,14 @@ extension _PlayerAudioFocus on PlayerState {
     if (_disposed || stillAllowed?.call() == false) return false;
     if (!await _activateAudioSessionForPlayback()) return false;
     if (_disposed || stillAllowed?.call() == false) return false;
+    final playGeneration = _playGeneration;
     final playback = _audio.play();
     if (waitForCompletion) {
       await playback;
     } else {
-      // just_audio's play Future represents the whole playback lifetime,
-      // including its next interruption, rather than playback starting.
+      // play 的返回值覆盖整段播放生命周期，启动播放时不能等待它结束。
       unawaited(playback.catchError((Object failure) {
-        if (_disposed) return;
+        if (_disposed || playGeneration != _playGeneration) return;
         error = ApiError.messageFor(failure);
         _notifyIfActive();
       }));

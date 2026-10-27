@@ -109,11 +109,13 @@ class _NativeAudio {
   final sources = <Map<dynamic, dynamic>>[];
   final initialPositions = <int?>[];
   final initialIndices = <int>[];
+  final seeks = <Map<dynamic, dynamic>>[];
   final unsupportedChapterIds = <String>{};
   final _channels = <MethodChannel>[];
   MethodChannel? _events;
   bool failFirstLoad = false;
   bool holdPlayback = false;
+  bool failSeek = false;
   int playCount = 0;
   int pauseCount = 0;
   Future<void>? pauseGate;
@@ -149,6 +151,10 @@ class _NativeAudio {
             pauseCount++;
             await pauseGate;
             finishPlayback();
+          }
+          if (request.method == 'seek') {
+            seeks.add(request.arguments as Map);
+            if (failSeek) throw PlatformException(code: 'seek_failed');
           }
           if (request.method == 'load') {
             final args = request.arguments as Map;
@@ -761,6 +767,67 @@ void main() {
 
     expect(player.isPlaying, isTrue);
     expect(app.api.durationUpdates, isEmpty);
+  });
+
+  test('starting a chapter does not await the end of playback', () async {
+    native.holdPlayback = true;
+    final item = chapter('/data/chapter.mp3');
+    await player
+        .playChapter(book, [item], item)
+        .timeout(const Duration(seconds: 2));
+    await waitForPlayback(() => native.playCount == 1 && player.isPlaying);
+    expect(player.isPlaying, isTrue);
+    expect(native.playCount, 1);
+  });
+
+  test('authentication changes rebuild the queue with fresh media URLs',
+      () async {
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    final items = [first, second];
+    await player.playChapter(book, items, first);
+    app.token = 'updated-token';
+    app.api.configure(baseUrl: app.activeUrl, token: app.token);
+    await player.playChapter(book, items, second);
+    expect(native.sources, hasLength(2));
+    expect(native.activeUri.queryParameters['token'], 'updated-token');
+  });
+
+  test('manual chapter selection seeks the existing native queue', () async {
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    final items = [first, second];
+    await player.playChapter(book, items, first);
+    await player.playChapter(book, items, second, startAt: 45);
+    expect(native.sources, hasLength(1));
+    expect(native.seeks.last['index'], 1);
+    expect(native.seeks.last['position'], 45000000);
+    expect(player.currentChapter?.id, second.id);
+  });
+
+  test('queue seek failure falls back to reloading the normal source',
+      () async {
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    final items = [first, second];
+    await player.playChapter(book, items, first);
+    native.failSeek = true;
+    await player.playChapter(book, items, second);
+    expect(native.sources, hasLength(2));
+    expect(native.activeUri.path, '/api/stream/second');
+    expect(native.activeUri.queryParameters['transcode'], isNull);
+  });
+
+  test('newly downloaded chapter replaces the old remote queue source',
+      () async {
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    final items = [first, second];
+    await player.playChapter(book, items, first);
+    downloads.paths[second.id] = 'C:/cache/second.mp3';
+    await player.playChapter(book, items, second);
+    expect(native.sources, hasLength(2));
+    expect(native.activeUri.scheme, 'file');
   });
 
   test('ordinary native queues still advance without reloading', () async {

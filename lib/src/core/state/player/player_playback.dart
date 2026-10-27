@@ -23,17 +23,20 @@ extension _PlayerPlayback on PlayerState {
     Chapter chapter, {
     double? startAt,
   }) async {
+    final playGeneration = ++_playGeneration;
     _cancelFocusRecovery(clearResume: true);
     // 清除可能残留的抑制标记，确保用户手动切集时正常起播；
     // 睡眠定时的监听器会在 notifyListeners 期间重新设置它。
     _suppressAutoPlay = false;
     await applySettings(appState.settings);
-    final playGeneration = ++_playGeneration;
-    currentBook = book;
-    chapters = sortChaptersForPlayback(chapterList);
-    if (chapters.every((item) => item.id != chapter.id)) {
-      chapters = sortChaptersForPlayback([...chapters, chapter]);
+    if (_disposed || playGeneration != _playGeneration) return;
+    var nextChapters = sortChaptersForPlayback(chapterList);
+    if (nextChapters.every((item) => item.id != chapter.id)) {
+      nextChapters = sortChaptersForPlayback([...nextChapters, chapter]);
     }
+    final reuseQueue = _canReuseAudioQueue(book, nextChapters);
+    currentBook = book;
+    chapters = nextChapters;
     final resumePosition = startAt ?? _startPositionFor(book, chapter);
     final chapterIndex = chapters.indexWhere((item) => item.id == chapter.id);
     final initialIndex = chapterIndex >= 0 ? chapterIndex : 0;
@@ -49,7 +52,7 @@ extension _PlayerPlayback on PlayerState {
     _seekGeneration++;
     _suppressPositionUpdates = true;
     _usingTranscodeStream = false;
-    _usingAudioQueue = false;
+    _usingAudioQueue = reuseQueue;
     _usingGatewaySingleChapterSource = false;
     _clearTranscodeClock();
     // 按集数睡眠：集数用完则阻止后续 _playWithSession 起播，并暂停旧音频。
@@ -75,13 +78,24 @@ extension _PlayerPlayback on PlayerState {
           position: resumePosition,
         );
       } else {
-        await _setAudioQueueWithRedirectRecovery(
-          book,
-          chapters,
-          initialIndex: initialIndex,
-          initialPosition:
-              Duration(milliseconds: (resumePosition * 1000).round()),
-        );
+        final reused = reuseQueue &&
+            await _seekExistingAudioQueue(
+              targetChapter,
+              initialIndex,
+              localPath: localPath,
+              position: resumePosition,
+            );
+        if (!_isActivePlay(playGeneration, targetChapter.id)) return;
+        if (!reused) {
+          _usingAudioQueue = false;
+          await _setAudioQueueWithRedirectRecovery(
+            book,
+            chapters,
+            initialIndex: initialIndex,
+            initialPosition:
+                Duration(milliseconds: (resumePosition * 1000).round()),
+          );
+        }
       }
       if (!_isActivePlay(playGeneration, targetChapter.id)) return;
       _usingAudioQueue = !useGatewaySingleChapter;
