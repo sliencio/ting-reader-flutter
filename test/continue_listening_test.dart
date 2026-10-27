@@ -57,12 +57,18 @@ class _App extends AppState {
 }
 
 class _Player extends ChangeNotifier implements PlayerState {
+  Book? activeBook;
+  Chapter? activeChapter;
   String? playedBook;
   String? playedChapter;
   double? position;
 
   @override
-  Book? get currentBook => null;
+  Book? get currentBook => activeBook;
+  @override
+  Chapter? get currentChapter => activeChapter;
+  @override
+  double get currentTime => position ?? 0;
 
   @override
   Future<void> playChapter(
@@ -106,6 +112,23 @@ Future<(_App, _Player)> _pump(WidgetTester tester, {bool fail = false}) async {
 }
 
 void main() {
+  testWidgets('retained resume card follows the current player',
+      (tester) async {
+    final (_, player) = await _pump(tester);
+    player.activeBook = Book.fromJson({'id': 'playing', 'title': '正在收听'});
+    player.activeChapter = Chapter.fromJson({
+      'id': 'playing-chapter',
+      'book_id': 'playing',
+      'title': '当前章节',
+    });
+    player.notifyListeners();
+    await tester.pump();
+    expect(find.text('正在收听'), findsOneWidget);
+    expect(find.text('当前章节'), findsOneWidget);
+    expect(find.text('新书'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('resume uses the latest book and its saved chapter position', (
     tester,
   ) async {

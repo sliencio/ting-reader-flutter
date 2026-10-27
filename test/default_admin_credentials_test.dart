@@ -52,6 +52,8 @@ class _ReminderApp extends AppState {
 
 class _ReminderPlayer extends ChangeNotifier implements PlayerState {
   @override
+  Book? get currentBook => null;
+  @override
   bool get isMiniCollapsed => false;
   @override
   bool get hasChapter => false;

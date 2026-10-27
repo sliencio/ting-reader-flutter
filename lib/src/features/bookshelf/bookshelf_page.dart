@@ -111,6 +111,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    if (!TickerMode.valuesOf(context).enabled) _closeFilterMenu();
     _shelf ??= BookshelfState(AppScope.appOf(context).api)
       ..addListener(_shelfChanged);
   }

@@ -115,6 +115,13 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   late final ShellNavigation _navigation;
+  static const _primaryDestinations = [
+    AppDestination.bookshelf,
+    AppDestination.downloads,
+    AppDestination.mine,
+  ];
+  final Map<AppDestination, Widget> _primaryPages = {};
+  String? _pageIdentity;
   AppDestination get _destination => _navigation.destination;
   AppDestination get _searchOrigin => _navigation.searchOrigin;
   String? get _bookId => _navigation.bookId;
@@ -424,6 +431,43 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _page() {
+    final app = AppScope.appOf(context);
+    final identity = '${app.serverUrl}:${app.user?.id}:${app.offlineMode}';
+    if (_pageIdentity != identity) {
+      _primaryPages.clear();
+      _pageIdentity = identity;
+    }
+    if (app.offlineMode) return _buildPage();
+
+    final primary =
+        !_navigation.hasDetail && _primaryDestinations.contains(_destination);
+    if (primary) _primaryPages.putIfAbsent(_destination, _buildPage);
+
+    // 主页面首次进入时创建，切换时保留列表、滚动位置和下载选择。
+    return Stack(
+      key: ValueKey(identity),
+      fit: StackFit.expand,
+      children: [
+        IndexedStack(
+          index: primary ? _primaryDestinations.indexOf(_destination) : null,
+          sizing: StackFit.expand,
+          children: [
+            for (final destination in _primaryDestinations)
+              ExcludeFocus(
+                excluding: !primary || _destination != destination,
+                child: TickerMode(
+                  enabled: primary && _destination == destination,
+                  child: _primaryPages[destination] ?? const SizedBox.shrink(),
+                ),
+              ),
+          ],
+        ),
+        if (!primary) _buildPage(),
+      ],
+    );
+  }
+
+  Widget _buildPage() {
     final bookId = _bookId;
     final playlistId = _playlistId;
     final seriesId = _seriesId;

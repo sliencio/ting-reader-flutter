@@ -46,8 +46,24 @@ class _ContinueListeningState extends State<ContinueListening> {
     }
   }
 
+  ProgressItem? _currentProgress() {
+    final player = AppScope.playerOf(context);
+    final book = player.currentBook;
+    if (book == null) return _recent;
+    final chapter = player.currentChapter;
+    if (chapter == null) return _recent;
+    return ProgressItem(
+      id: '',
+      bookId: book.id,
+      chapterId: chapter.id,
+      bookTitle: book.title,
+      chapterTitle: chapter.title,
+      position: player.currentTime,
+    );
+  }
+
   Future<void> _resume() async {
-    final recent = _recent;
+    final recent = _currentProgress();
     if (_starting || recent == null) return;
     setState(() => _starting = true);
     final app = AppScope.appOf(context);
@@ -89,7 +105,7 @@ class _ContinueListeningState extends State<ContinueListening> {
 
   @override
   Widget build(BuildContext context) {
-    final recent = _recent;
+    final recent = _currentProgress();
     if (recent == null) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 16),
