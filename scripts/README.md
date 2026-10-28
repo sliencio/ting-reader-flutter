@@ -53,13 +53,30 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 android 
 
 ## Windows
 
-安装 Flutter 和 Visual Studio 的“使用 C++ 的桌面开发”工作负载，包含相应 Windows SDK、CMake 和 ATL 组件。PowerShell 5.1 或更新版本执行：
+安装 Flutter 和 Visual Studio 的“使用 C++ 的桌面开发”工作负载，包含相应 Windows SDK、CMake 和 ATL 组件。生成 EXE 安装包还需要安装 [Inno Setup 6 或 7](https://jrsoftware.org/isdl.php)，脚本会自动查找常见安装目录；自定义安装位置可通过环境变量 `INNO_SETUP_COMPILER` 指定 `ISCC.exe` 的完整路径。PowerShell 5.1 或更新版本执行：
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 windows
 ```
 
-输出 `dist/TingReader-windows-x64.zip`。解压整个压缩包后启动 `ting_reader_flutter.exe`，不要只拷贝 EXE。脚本会尝试附带本机 Visual Studio 的 VC++ 运行库；找不到时，目标电脑需要安装 Visual C++ x64 运行库。
+默认同时输出两个文件：
+
+- `dist/TingReader-windows-x64-setup.exe`：双击安装，提供开始菜单快捷方式和卸载入口。
+- `dist/TingReader-windows-x64.zip`：便携版，解压整个压缩包后启动 `ting_reader_flutter.exe`，不要只拷贝 EXE。
+
+如果已经运行过 `flutter build windows --release`，已有 `build/windows/x64/runner/Release` 目录，可以直接封装，无需重新编译：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 windows -PackageOnly
+```
+
+只需要便携版、不使用 Inno Setup 时执行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 windows -PortableOnly
+```
+
+`-PackageOnly` 可以与 `-PortableOnly` 一起使用，但不能与 `-Clean` 一起使用。脚本会尝试附带本机 Visual Studio 的 VC++ 运行库；找不到时，目标电脑需要安装 Visual C++ x64 运行库。
 
 ## macOS
 

@@ -5,7 +5,9 @@ param(
     [ValidateSet('windows', 'android')]
     [string]$Target,
     [switch]$Clean,
-    [switch]$Aab
+    [switch]$Aab,
+    [switch]$PortableOnly,
+    [switch]$PackageOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -26,15 +28,46 @@ if ($env:OS -ne 'Windows_NT') {
 if ($Aab -and $Target -ne 'android') {
     throw '-Aab 只适用于 Android。'
 }
-$flutterName = if ($env:FLUTTER_BIN) { $env:FLUTTER_BIN } else { 'flutter' }
-$script:flutterCommand = (Get-Command $flutterName -ErrorAction Stop).Source
+if (($PortableOnly -or $PackageOnly) -and $Target -ne 'windows') {
+    throw '-PortableOnly 和 -PackageOnly 只适用于 Windows。'
+}
+if ($Clean -and $PackageOnly) {
+    throw '-PackageOnly 使用现有构建目录，不能同时指定 -Clean。'
+}
+$iscc = $null
+if ($Target -eq 'windows' -and !$PortableOnly) {
+    if ($env:INNO_SETUP_COMPILER) {
+        $iscc = (Get-Command $env:INNO_SETUP_COMPILER -ErrorAction Stop).Source
+    } else {
+        $installed = Get-Command ISCC.exe -ErrorAction SilentlyContinue
+        if ($installed) { $iscc = $installed.Source }
+        foreach ($base in @(${env:ProgramFiles(x86)}, $env:ProgramFiles, (Join-Path $env:LOCALAPPDATA 'Programs'))) {
+            if ($iscc -or !$base) { continue }
+            foreach ($version in @('7', '6')) {
+                $candidate = Join-Path $base "Inno Setup $version\ISCC.exe"
+                if (Test-Path -LiteralPath $candidate -PathType Leaf) { $iscc = $candidate; break }
+            }
+        }
+    }
+    if (!$iscc) {
+        throw '生成 EXE 安装包需要 Inno Setup 6 或 7；请先安装，或加 -PortableOnly 仅生成便携 ZIP。'
+    }
+}
+if (!$PackageOnly) {
+    $flutterName = if ($env:FLUTTER_BIN) { $env:FLUTTER_BIN } else { 'flutter' }
+    $script:flutterCommand = (Get-Command $flutterName -ErrorAction Stop).Source
+}
 Push-Location -LiteralPath $projectRoot
 try {
-    Invoke-Flutter -FlutterArguments @('--version')
-    if ($Clean) { Invoke-Flutter -FlutterArguments @('clean') }
-    Invoke-Flutter -FlutterArguments @('pub', 'get', '--enforce-lockfile')
+    if (!$PackageOnly) {
+        Invoke-Flutter -FlutterArguments @('--version')
+        if ($Clean) { Invoke-Flutter -FlutterArguments @('clean') }
+        Invoke-Flutter -FlutterArguments @('pub', 'get', '--enforce-lockfile')
+    }
     if ($Target -eq 'windows') {
-        Invoke-Flutter -FlutterArguments @('build', 'windows', '--release', '--no-pub', '--target-platform', 'windows-x64')
+        if (!$PackageOnly) {
+            Invoke-Flutter -FlutterArguments @('build', 'windows', '--release', '--no-pub', '--target-platform', 'windows-x64')
+        }
         $source = Join-Path $projectRoot 'build\windows\x64\runner\Release'
         if (!(Test-Path -LiteralPath (Join-Path $source 'ting_reader_flutter.exe'))) {
             throw '没有找到 Windows 运行目录。'
@@ -80,6 +113,30 @@ try {
         }
         $name = 'TingReader-windows-x64.zip'
         Compress-Archive -LiteralPath $bundle -DestinationPath (Join-Path $stage $name)
+        if (!$PortableOnly) {
+            $versionMatch = [regex]::Match((Get-Content -LiteralPath (Join-Path $projectRoot 'pubspec.yaml') -Raw -Encoding UTF8), '(?m)^version:\s*([0-9]+\.[0-9]+\.[0-9]+)')
+            if (!$versionMatch.Success) { throw '无法从 pubspec.yaml 读取安装包版本。' }
+            $previousEnvironment = @{}
+            foreach ($key in @('TING_READER_VERSION', 'TING_READER_BUILD_DIR', 'TING_READER_OUTPUT_DIR')) {
+                $previousEnvironment[$key] = [Environment]::GetEnvironmentVariable($key, 'Process')
+            }
+            try {
+                $env:TING_READER_VERSION = $versionMatch.Groups[1].Value
+                $env:TING_READER_BUILD_DIR = $bundle
+                $env:TING_READER_OUTPUT_DIR = $stage
+                & $iscc /Qp (Join-Path $projectRoot 'windows\installer\ting_reader.iss')
+                if ($LASTEXITCODE -ne 0) { throw "安装器编译失败，退出码：$LASTEXITCODE" }
+            } finally {
+                foreach ($key in $previousEnvironment.Keys) {
+                    [Environment]::SetEnvironmentVariable($key, $previousEnvironment[$key], 'Process')
+                }
+            }
+            $installerName = 'TingReader-windows-x64-setup.exe'
+            $installer = Join-Path $stage $installerName
+            if (!(Test-Path -LiteralPath $installer -PathType Leaf)) { throw '安装器编译未生成 EXE 文件。' }
+            Move-Item -LiteralPath $installer -Destination (Join-Path $dist $installerName) -Force
+            Write-Host "EXE 安装包：$(Join-Path $dist $installerName)"
+        }
     } else {
         Copy-Item -LiteralPath $source -Destination (Join-Path $stage $name)
     }

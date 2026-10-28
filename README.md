@@ -31,11 +31,13 @@ flutter run -d android
 flutter build apk --release
 ```
 
-Windows 构建：
+Windows 安装包构建（需要安装 Inno Setup 6 或 7）：
 
 ```powershell
-flutter build windows --release
+powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 windows
 ```
+
+生成的 EXE 安装包和便携 ZIP 位于 `dist/`。已有 Flutter 构建目录时，可追加 `-PackageOnly` 直接封装。
 
 Linux 构建需要系统依赖：
 
@@ -51,7 +53,7 @@ GitHub Actions 会在推送 `v*` tag 或手动触发时构建以下产物：
 
 - `ting-reader-flutter-android.apk`
 - `ting-reader-flutter-android.aab`
-- `TingReader-windows-x64.zip`
+- `TingReader-windows-x64-setup.exe`
 - `TingReader-linux-x64.tar.gz`
 - `TingReader-macos.zip`
 - `TingReader-ios-nosign.zip`
