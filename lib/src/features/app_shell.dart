@@ -30,6 +30,7 @@ import '../shared/app_scope.dart';
 import '../shared/common/common_widgets.dart';
 import '../shared/plugin_extensions/plugin_extension_host.dart';
 import 'player/mini_player.dart';
+import 'settings_push_layout.dart';
 
 part 'shell_mobile_navigation.dart';
 
@@ -113,7 +114,6 @@ class _AppShellState extends State<AppShell> {
   static const _primaryDestinations = [
     AppDestination.bookshelf,
     AppDestination.downloads,
-    AppDestination.mine,
   ];
   final Map<AppDestination, Widget> _primaryPages = {};
   String? _pageIdentity;
@@ -128,6 +128,9 @@ class _AppShellState extends State<AppShell> {
       _navigation.activePluginPage;
   PluginItem? get _activePluginLogs => _navigation.activePluginLogs;
   bool _mobileAdminDrawerOpen = false;
+  bool _settingsOpen = false;
+  bool _settingsCreated = false;
+  final _settingsMessengerKey = GlobalKey<ScaffoldMessengerState>();
   ClientExtensionRegistrySnapshot get _pluginRegistry =>
       AppScope.appOf(context).clientExtensions.snapshot;
   String? _defaultCredentialsReminderIdentity;
@@ -136,6 +139,10 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     _navigation = ShellNavigation.fromQuery(Uri.base.queryParameters);
+    if (_navigation.destination == AppDestination.mine) {
+      _navigation.go(AppDestination.bookshelf);
+      _settingsOpen = _settingsCreated = true;
+    }
   }
 
   @override
@@ -233,6 +240,7 @@ class _AppShellState extends State<AppShell> {
   void _navigate(VoidCallback change) {
     setState(() {
       _mobileAdminDrawerOpen = false;
+      _settingsOpen = false;
       change();
     });
     if (hidesMiniPlayer(_navigation.navDestination)) {
@@ -240,8 +248,22 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _go(AppDestination destination) =>
-      _navigate(() => _navigation.go(destination));
+  void _go(AppDestination destination) {
+    if (destination == AppDestination.mine) {
+      if (_navigation.backDestination == AppDestination.mine) {
+        _navigation.go(AppDestination.bookshelf);
+      }
+      _openSettings();
+      return;
+    }
+    _navigate(() => _navigation.go(destination));
+  }
+
+  void _openSettings() => setState(() {
+        _settingsOpen = _settingsCreated = true;
+      });
+
+  void _closeSettings() => setState(() => _settingsOpen = false);
   void _openPluginLogs(PluginItem plugin) =>
       _navigate(() => _navigation.openPluginLogs(plugin));
   void _openPluginPage(ClientExtensionDescriptor extension) =>
@@ -258,16 +280,22 @@ class _AppShellState extends State<AppShell> {
       ..clear()
       ..clearLiveImages();
     setState(_primaryPages.clear);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: EdgeInsets.fromLTRB(
-            16, 0, 16, AppScope.playerOf(context).hasChapter ? 180 : 84),
-        content: Text(context.localeText('缓存已清除，下次打开将从服务端重新加载',
-            'Cache cleared. Pages will reload from the server.'))));
+    (_settingsOpen
+            ? _settingsMessengerKey.currentState
+            : ScaffoldMessenger.of(context))
+        ?.showSnackBar(SnackBar(
+            behavior: SnackBarBehavior.floating,
+            margin: EdgeInsets.fromLTRB(
+                16, 0, 16, AppScope.playerOf(context).hasChapter ? 180 : 84),
+            content: Text(context.localeText('缓存已清除，下次打开将从服务端重新加载',
+                'Cache cleared. Pages will reload from the server.'))));
   }
 
   void _openMobileAdminDrawer() {
-    setState(() => _mobileAdminDrawerOpen = true);
+    setState(() {
+      _settingsOpen = false;
+      _mobileAdminDrawerOpen = true;
+    });
   }
 
   void _closeMobileAdminDrawer() {
@@ -290,6 +318,10 @@ class _AppShellState extends State<AppShell> {
   void _backFromDetail() => setState(_navigation.closeDetail);
 
   bool _handleSystemBack() {
+    if (_settingsOpen) {
+      _closeSettings();
+      return true;
+    }
     final player = AppScope.playerOf(context);
     if (player.isExpanded) {
       player.setExpanded(false);
@@ -348,103 +380,85 @@ class _AppShellState extends State<AppShell> {
                       !hidesMiniPlayer(navDestination);
                   final pluginExtensionBottom =
                       showMiniPlayer ? 110.0 + bottomInset : 24.0 + bottomInset;
-                  return Stack(
-                    children: [
-                      Scaffold(
-                        body: SafeArea(
-                          bottom: false,
-                          child: Column(children: [
-                            Row(children: [
-                              if (!appState.offlineMode &&
-                                  !_navigation.hasDetail &&
-                                  _primaryDestinations.contains(_destination) &&
-                                  _destination != AppDestination.bookshelf)
+                  return SettingsPushLayout(
+                    open: _settingsOpen,
+                    onClose: _closeSettings,
+                    panel: _settingsCreated
+                        ? _settingsPanel()
+                        : const SizedBox.shrink(),
+                    child: Stack(
+                      children: [
+                        Scaffold(
+                          body: SafeArea(
+                            bottom: false,
+                            child: Column(children: [
+                              Row(children: [
                                 IconButton(
-                                  tooltip: context.localeText('返回', 'Back'),
-                                  icon: const Icon(Icons.arrow_back_rounded),
-                                  onPressed: () {
-                                    if (!_handleSystemBack()) {
-                                      _go(AppDestination.bookshelf);
-                                    }
-                                  },
+                                  tooltip: context.localeText('设置', 'Settings'),
+                                  icon: const Icon(Icons.settings_outlined),
+                                  onPressed: _openSettings,
                                 ),
-                              const Spacer(),
-                              if (DesktopWindow.instance.supported &&
-                                  !DesktopWindow.instance.usesCustomTitleBar)
-                                IconButton(
-                                  tooltip:
-                                      context.localeText('小窗模式', 'Mini window'),
-                                  icon: const Icon(
-                                      Icons.picture_in_picture_alt_rounded),
-                                  onPressed: () =>
-                                      DesktopWindow.instance.setMini(true),
-                                ),
-                              PopupMenuButton<AppDestination>(
-                                tooltip: context.localeText('更多功能', 'App menu'),
-                                icon: const Icon(Icons.more_horiz_rounded),
-                                onSelected: _go,
-                                itemBuilder: (context) => [
-                                  for (final entry
-                                      in _navigationEntries(context))
-                                    if (!appState.offlineMode ||
-                                        entry.destination ==
-                                            AppDestination.downloads)
-                                      PopupMenuItem(
-                                        value: entry.destination,
-                                        child: Row(children: [
-                                          Icon(entry.icon, size: 20),
-                                          const SizedBox(width: 12),
-                                          Text(entry.label),
-                                        ]),
-                                      ),
-                                  if (appState.offlineMode)
-                                    PopupMenuItem(
-                                      onTap: appState.logout,
-                                      child: Text(context.l10n.navReturnLogin),
-                                    ),
-                                  if (DesktopWindow.instance.supported)
-                                    PopupMenuItem(
-                                      onTap: DesktopWindow.instance.requestExit,
-                                      child: Text(context.localeText(
-                                          '退出软件', 'Exit application')),
-                                    ),
-                                ],
-                              ),
-                              const SizedBox(width: 8),
+                                if (!appState.offlineMode &&
+                                    !_navigation.hasDetail &&
+                                    _primaryDestinations
+                                        .contains(_destination) &&
+                                    _destination != AppDestination.bookshelf)
+                                  IconButton(
+                                    tooltip: context.localeText('返回', 'Back'),
+                                    icon: const Icon(Icons.arrow_back_rounded),
+                                    onPressed: () {
+                                      if (!_handleSystemBack()) {
+                                        _go(AppDestination.bookshelf);
+                                      }
+                                    },
+                                  ),
+                                const Spacer(),
+                                if (DesktopWindow.instance.supported &&
+                                    !DesktopWindow.instance.usesCustomTitleBar)
+                                  IconButton(
+                                    tooltip: context.localeText(
+                                        '小窗模式', 'Mini window'),
+                                    icon: const Icon(
+                                        Icons.picture_in_picture_alt_rounded),
+                                    onPressed: () =>
+                                        DesktopWindow.instance.setMini(true),
+                                  ),
+                                const SizedBox(width: 8),
+                              ]),
+                              Expanded(child: _page()),
                             ]),
-                            Expanded(child: _page()),
-                          ]),
-                        ),
-                      ),
-                      if (showMiniPlayer)
-                        Positioned(
-                          left: collapsedMini ? 24 : 12,
-                          right: collapsedMini ? null : 12,
-                          bottom: bottomInset + (collapsedMini ? 20 : 12),
-                          child: const MiniPlayer(),
-                        ),
-                      if (!player.isExpanded && !_mobileAdminDrawerOpen)
-                        Positioned.fill(
-                          child: PluginExtensionHost(
-                            bottomOffset: pluginExtensionBottom,
-                            enabled: appState.pluginToolMenuEnabled &&
-                                _destination == AppDestination.plugins,
                           ),
                         ),
-                      if (_mobileAdminDrawerOpen)
-                        Positioned.fill(
-                          child: _MobileAdminOverlay(
-                            go: _go,
-                            current: navDestination,
-                            onClose: _closeMobileAdminDrawer,
-                            pluginPages: _sidebarPluginPages,
-                            activePluginPageId: _activePluginPage?.id,
-                            onOpenPluginPage: _openPluginPage,
+                        if (showMiniPlayer)
+                          Positioned(
+                            left: collapsedMini ? 24 : 12,
+                            right: collapsedMini ? null : 12,
+                            bottom: bottomInset + (collapsedMini ? 20 : 12),
+                            child: const MiniPlayer(),
                           ),
-                        ),
-                      if (player.isExpanded)
-                        const Positioned.fill(child: ExpandedPlayerOverlay()),
-                    ],
+                        if (!player.isExpanded && !_mobileAdminDrawerOpen)
+                          Positioned.fill(
+                            child: PluginExtensionHost(
+                              bottomOffset: pluginExtensionBottom,
+                              enabled: appState.pluginToolMenuEnabled &&
+                                  _destination == AppDestination.plugins,
+                            ),
+                          ),
+                        if (_mobileAdminDrawerOpen)
+                          Positioned.fill(
+                            child: _MobileAdminOverlay(
+                              go: _go,
+                              current: navDestination,
+                              onClose: _closeMobileAdminDrawer,
+                              pluginPages: _sidebarPluginPages,
+                              activePluginPageId: _activePluginPage?.id,
+                              onOpenPluginPage: _openPluginPage,
+                            ),
+                          ),
+                        if (player.isExpanded)
+                          const Positioned.fill(child: ExpandedPlayerOverlay()),
+                      ],
+                    ),
                   );
                 },
               );
@@ -490,6 +504,76 @@ class _AppShellState extends State<AppShell> {
         ),
         if (!primary) _buildPage(),
       ],
+    );
+  }
+
+  Widget _settingsPanel() {
+    final app = AppScope.appOf(context);
+    final navigation = Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 20),
+      child: Column(children: [
+        for (final entry in _navigationEntries(context))
+          if (entry.destination != AppDestination.mine &&
+              (!app.offlineMode ||
+                  entry.destination == AppDestination.downloads))
+            ListTile(
+              leading: Icon(entry.icon),
+              title: Text(entry.label),
+              selected: app.offlineMode
+                  ? entry.destination == AppDestination.downloads
+                  : entry.destination == _navigation.navDestination,
+              onTap: () => _go(entry.destination),
+            ),
+      ]),
+    );
+    return ScaffoldMessenger(
+      key: _settingsMessengerKey,
+      child: Scaffold(
+        body: SafeArea(
+          child: Column(children: [
+            Padding(
+              padding: const EdgeInsets.only(left: 20, right: 8),
+              child: Row(children: [
+                Expanded(
+                    child: Text(context.localeText('设置', 'Settings'),
+                        style: Theme.of(context).textTheme.titleLarge)),
+                IconButton(
+                  tooltip: context.localeText('关闭设置', 'Close settings'),
+                  icon: const Icon(Icons.chevron_left_rounded),
+                  onPressed: _closeSettings,
+                ),
+              ]),
+            ),
+            Expanded(
+              child: app.offlineMode
+                  ? PageListView(children: [
+                      navigation,
+                      ListTile(
+                        leading: const Icon(Icons.login_rounded),
+                        title: Text(context.l10n.navReturnLogin),
+                        onTap: app.logout,
+                      ),
+                      if (DesktopWindow.instance.supported)
+                        ListTile(
+                          leading: const Icon(Icons.power_settings_new_rounded),
+                          title: Text(
+                              context.localeText('退出软件', 'Exit application')),
+                          onTap: DesktopWindow.instance.requestExit,
+                        ),
+                    ])
+                  : ListeningSettingsPage(
+                      embedded: true,
+                      navigation: navigation,
+                      forceRefresh: _forceRefresh,
+                      go: _go,
+                      openManagement: _openMobileAdminDrawer,
+                      hasPluginPages: _sidebarPluginPages.isNotEmpty,
+                    ),
+            ),
+          ]),
+        ),
+      ),
     );
   }
 

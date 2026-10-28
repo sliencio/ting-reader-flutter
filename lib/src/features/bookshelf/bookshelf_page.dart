@@ -12,7 +12,6 @@ import '../../shared/cards/book_card.dart';
 import '../../shared/common/common_widgets.dart';
 import '../../shared/filter/display_filter_menu.dart';
 import 'book_delete_dialog.dart';
-import 'continue_listening.dart';
 
 part 'bookshelf_toolbar.dart';
 part 'bookshelf_content.dart';
@@ -37,7 +36,6 @@ class BookshelfPage extends StatefulWidget {
 
 class _BookshelfPageState extends State<BookshelfPage> {
   static const int _pageSize = 50;
-  int _refreshRevision = 0;
 
   BookshelfState? _shelf;
   bool get _loading => _shelf?.loading ?? true;
@@ -135,7 +133,6 @@ class _BookshelfPageState extends State<BookshelfPage> {
     if (mounted) {
       setState(() {
         _resetVisibleItems();
-        _refreshRevision++;
       });
     }
   }
@@ -340,11 +337,6 @@ class _BookshelfPageState extends State<BookshelfPage> {
               : null,
         ),
         const SizedBox(height: 10),
-        if (!_selectionMode)
-          ContinueListening(
-            key: ValueKey(_refreshRevision),
-            openBook: widget.openBook,
-          ),
         if (!hasContent)
           EmptyState(
             icon: Icons.storage_rounded,

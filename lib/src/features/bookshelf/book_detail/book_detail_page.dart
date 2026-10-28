@@ -7,6 +7,7 @@ import '../../../core/models/models.dart';
 import '../../../core/plugin_extensions/registry.dart';
 import '../../../core/plugin_extensions/types.dart';
 import '../../../core/state/books_state.dart';
+import '../../../core/services/chapter_read_marks.dart';
 import '../../../core/state/download_state.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/formatters.dart';

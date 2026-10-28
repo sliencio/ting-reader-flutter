@@ -59,10 +59,76 @@ class _ChapterSectionState extends State<_ChapterSection> {
   final Set<String> _selectedIds = {};
   final Map<int, GlobalKey> _groupKeys = {};
   bool _selectionMode = false;
+  final _readMarks = ChapterReadMarksStore();
+  Set<String> _manuallyReadIds = {};
+  String? _readIdentity;
+  bool _marksReady = false;
+  bool _savingReadMarks = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _loadReadMarks();
+  }
+
+  Future<void> _loadReadMarks() async {
+    final app = AppScope.appOf(context);
+    final identity =
+        '${app.serverUrl}:${app.fnId}:${app.user?.id}:${widget.book.id}';
+    if (_readIdentity == identity) return;
+    _readIdentity = identity;
+    _marksReady = false;
+    _savingReadMarks = false;
+    _manuallyReadIds = {};
+    try {
+      final ids = await _readMarks.read(identity);
+      if (!mounted || _readIdentity != identity) return;
+      setState(() {
+        _manuallyReadIds = ids;
+        _marksReady = true;
+      });
+    } catch (_) {
+      // 本地标记不可用时仍允许浏览、播放和下载章节。
+    }
+  }
+
+  Future<void> _markSelectedRead() async {
+    final identity = _readIdentity;
+    if (!_marksReady ||
+        _savingReadMarks ||
+        identity == null ||
+        _selectedIds.isEmpty) {
+      return;
+    }
+    final selected = Set<String>.of(_selectedIds);
+    final next = {..._manuallyReadIds, ...selected};
+    setState(() => _savingReadMarks = true);
+    try {
+      await _readMarks.write(identity, next);
+      if (!mounted || identity != _readIdentity) return;
+      setState(() {
+        _manuallyReadIds = next;
+        _selectedIds.clear();
+        _selectionMode = false;
+      });
+      _showDownloadMessage(context.localeText(
+          '已在本机标记 ${selected.length} 个章节为已读',
+          'Marked ${selected.length} chapters as read on this device'));
+    } catch (error) {
+      if (mounted && identity == _readIdentity) {
+        _showDownloadMessage(ApiError.messageFor(error));
+      }
+    } finally {
+      if (mounted && identity == _readIdentity) {
+        setState(() => _savingReadMarks = false);
+      }
+    }
+  }
 
   @override
   void didUpdateWidget(covariant _ChapterSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.book.id != widget.book.id) _loadReadMarks();
     final visibleIds = widget.chapters.map((chapter) => chapter.id).toSet();
     _selectedIds.removeWhere((id) => !visibleIds.contains(id));
     if (oldWidget.activeTab != widget.activeTab ||
@@ -99,12 +165,6 @@ class _ChapterSectionState extends State<_ChapterSection> {
     });
   }
 
-  List<Chapter> _downloadableChapters(DownloadState downloadState) {
-    return widget.chapters
-        .where((chapter) => downloadState.canQueueChapter(chapter.id))
-        .toList();
-  }
-
   void _toggleSelectionMode() {
     setState(() {
       _selectionMode = !_selectionMode;
@@ -112,11 +172,8 @@ class _ChapterSectionState extends State<_ChapterSection> {
     });
   }
 
-  void _toggleChapterSelection(Chapter chapter, DownloadState downloadState) {
-    if (downloadState.hasChapter(chapter.id) ||
-        downloadState.taskForChapter(chapter.id) != null) {
-      return;
-    }
+  void _toggleChapterSelection(Chapter chapter) {
+    if (_savingReadMarks) return;
     setState(() {
       if (_selectedIds.contains(chapter.id)) {
         _selectedIds.remove(chapter.id);
@@ -126,10 +183,8 @@ class _ChapterSectionState extends State<_ChapterSection> {
     });
   }
 
-  void _toggleCurrentPage(DownloadState downloadState) {
-    final ids = _downloadableChapters(downloadState)
-        .map((chapter) => chapter.id)
-        .toList();
+  void _toggleCurrentPage() {
+    final ids = widget.chapters.map((chapter) => chapter.id).toList();
     setState(() {
       final allSelected = ids.every(_selectedIds.contains);
       if (allSelected) {
@@ -204,9 +259,10 @@ class _ChapterSectionState extends State<_ChapterSection> {
   @override
   Widget build(BuildContext context) {
     final downloadState = AppScope.downloadOf(context);
-    final downloadable = _downloadableChapters(downloadState);
-    final allPageSelected = downloadable.isNotEmpty &&
-        downloadable.map((chapter) => chapter.id).every(_selectedIds.contains);
+    final allPageSelected = widget.chapters.isNotEmpty &&
+        widget.chapters
+            .map((chapter) => chapter.id)
+            .every(_selectedIds.contains);
     final selectedDownloadable = widget.chapters
         .where((chapter) =>
             _selectedIds.contains(chapter.id) &&
@@ -286,18 +342,19 @@ class _ChapterSectionState extends State<_ChapterSection> {
                 icon: Icon(Icons.settings_rounded, size: compact ? 18 : 20),
               );
               final batchButton = TextButton.icon(
-                onPressed:
-                    widget.chapters.isEmpty ? null : _toggleSelectionMode,
+                onPressed: widget.chapters.isEmpty || _savingReadMarks
+                    ? null
+                    : _toggleSelectionMode,
                 icon: Icon(
                   _selectionMode
                       ? Icons.close_rounded
-                      : Icons.download_for_offline_outlined,
+                      : Icons.checklist_rounded,
                   size: actionIconSize,
                 ),
                 label: Text(
                   _selectionMode
                       ? context.l10n.commonCancel
-                      : context.localeText('批量下载', 'Batch Download'),
+                      : context.localeText('选择曲目', 'Select chapters'),
                   style: actionTextStyle,
                 ),
                 style: TextButton.styleFrom(
@@ -464,13 +521,13 @@ class _ChapterSectionState extends State<_ChapterSection> {
                         ? context.localeText('取消本页', 'Unselect Page')
                         : context.localeText('全选本页', 'Select Page'),
                     compact: compact,
-                    onPressed: downloadable.isEmpty
+                    onPressed: widget.chapters.isEmpty || _savingReadMarks
                         ? null
-                        : () => _toggleCurrentPage(downloadState),
+                        : _toggleCurrentPage,
                   );
                   final countBadge = BatchCountBadge(
-                    label: context.localeText('已选 $selectedDownloadable',
-                        '$selectedDownloadable selected'),
+                    label: context.localeText('已选 ${_selectedIds.length}',
+                        '${_selectedIds.length} selected'),
                     compact: compact,
                   );
                   final downloadButton = BatchActionButton(
@@ -480,30 +537,30 @@ class _ChapterSectionState extends State<_ChapterSection> {
                         : context.localeText('下载选中', 'Download Selected'),
                     filled: true,
                     compact: compact,
-                    onPressed:
-                        selectedDownloadable == 0 ? null : _downloadSelected,
+                    onPressed: selectedDownloadable == 0 || _savingReadMarks
+                        ? null
+                        : _downloadSelected,
                   );
-                  if (compact) {
-                    return Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        selectButton,
-                        countBadge,
-                        downloadButton,
-                      ],
-                    );
-                  }
-                  final trailing = Wrap(
-                    spacing: 10,
+                  final readButton = BatchActionButton(
+                    icon: Icons.task_alt_rounded,
+                    label: context.localeText('标记已读', 'Mark as read'),
+                    compact: compact,
+                    loading: _savingReadMarks,
+                    onPressed:
+                        _selectedIds.isEmpty || !_marksReady || _savingReadMarks
+                            ? null
+                            : _markSelectedRead,
+                  );
+                  return Wrap(
+                    spacing: compact ? 8 : 10,
                     runSpacing: 8,
                     crossAxisAlignment: WrapCrossAlignment.center,
-                    alignment: WrapAlignment.end,
-                    children: [countBadge, downloadButton],
-                  );
-                  return Row(
-                    children: [selectButton, const Spacer(), trailing],
+                    children: [
+                      selectButton,
+                      countBadge,
+                      readButton,
+                      downloadButton
+                    ],
                   );
                 },
               ),
@@ -532,6 +589,8 @@ class _ChapterSectionState extends State<_ChapterSection> {
                       ),
                       child: _ChapterListRow(
                         chapter: displayChapters[i],
+                        manuallyRead:
+                            _manuallyReadIds.contains(displayChapters[i].id),
                         active: widget.highlightedChapterId ==
                             displayChapters[i].id,
                         playing:
@@ -546,7 +605,6 @@ class _ChapterSectionState extends State<_ChapterSection> {
                             downloadState.taskForChapter(displayChapters[i].id),
                         onSelected: () => _toggleChapterSelection(
                           displayChapters[i],
-                          downloadState,
                         ),
                         onPlay: () => widget.onPlayChapter(displayChapters[i]),
                         onDownload: () => _downloadChapter(displayChapters[i]),

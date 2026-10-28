@@ -80,19 +80,43 @@ Future<(_App, _Player)> _pump(WidgetTester tester, Size size) async {
 }
 
 void main() {
+  for (final width in [320.0, 390.0, 1440.0]) {
+    testWidgets('left gear opens settings while retaining the page at $width',
+        (tester) async {
+      await _pump(tester, Size(width, 1000));
+      final page = tester.element(find.byType(BookshelfPage));
+      final before = tester.getRect(find.byType(BookshelfPage));
+      expect(tester.getTopLeft(find.byTooltip('Settings')).dx, lessThan(24));
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 130));
+      final halfway = tester.getRect(find.byType(BookshelfPage));
+      expect(halfway.left, greaterThan(before.left));
+      expect(
+          halfway.left, lessThan(before.left + (width * 0.88).clamp(0, 420)));
+      await tester.pumpAndSettle();
+      expect(find.text('Playback & appearance'), findsOneWidget);
+      await tester.tap(find.byTooltip('Close settings'));
+      await tester.pumpAndSettle();
+      expect(
+          identical(tester.element(find.byType(BookshelfPage)), page), isTrue);
+      expect(tester.getRect(find.byType(BookshelfPage)).left,
+          closeTo(before.left, 0.001));
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   testWidgets('force refresh discards retained shelf and details',
       (tester) async {
     final (app, _) = await _pump(tester, const Size(390, 844));
     final shelf = tester.state(find.byType(BookshelfPage));
     final revision = app.bookDetailsCache.revision;
-    await tester.tap(find.byTooltip('App menu'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Settings').last);
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Force refresh'));
     await tester.pumpAndSettle();
     expect(app.bookDetailsCache.revision, revision + 1);
-    await tester.tap(find.byTooltip('App menu'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Bookshelf').last);
     await tester.pumpAndSettle();
@@ -111,15 +135,13 @@ void main() {
       expect(find.text('Downloads'), findsNothing);
       expect(find.byType(DownloadsPage, skipOffstage: false), findsNothing);
 
-      await tester.tap(find.byTooltip('App menu'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Settings').last);
+      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       expect(find.text('Playback & appearance'), findsOneWidget);
       expect(find.byType(DownloadsPage, skipOffstage: false), findsNothing);
       player.notifyListeners();
       await tester.pump();
-      await tester.tap(find.byTooltip('App menu'));
+      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Bookshelf').last);
       await tester.pumpAndSettle();
@@ -127,16 +149,16 @@ void main() {
           identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
       expect(app.client.requests, requests);
 
-      await tester.tap(find.byTooltip('App menu'));
+      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Downloads').last);
       await tester.pumpAndSettle();
       final downloads = tester.state(find.byType(DownloadsPage));
-      await tester.tap(find.byTooltip('App menu'));
+      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Bookshelf').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('App menu'));
+      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Downloads').last);
       await tester.pumpAndSettle();

@@ -96,7 +96,8 @@ class _WindowTitleBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final window = DesktopWindow.instance;
-    Widget button(String label, IconData icon, Future<void> Function() action,
+    Widget button(String label, WindowCaptionAction icon,
+            Future<void> Function() action,
             {bool close = false}) =>
         SizedBox(
             width: 44,
@@ -116,7 +117,7 @@ class _WindowTitleBar extends StatelessWidget {
                         ? Colors.white
                         : Theme.of(context).colorScheme.onSurface),
               ),
-              icon: Icon(icon),
+              icon: WindowCaptionIcon(icon),
               onPressed: action,
             ));
     return SizedBox(
@@ -157,22 +158,83 @@ class _WindowTitleBar extends StatelessWidget {
               context.localeText(window.isMini ? '返回主窗口' : '小窗模式',
                   window.isMini ? 'Restore window' : 'Mini window'),
               window.isMini
-                  ? Icons.open_in_full_rounded
-                  : Icons.picture_in_picture_alt_rounded,
+                  ? WindowCaptionAction.restore
+                  : WindowCaptionAction.mini,
               () => window.setMini(!window.isMini)),
-          button(context.localeText('最小化', 'Minimize'), Icons.remove_rounded,
-              window.minimize),
+          button(context.localeText('最小化', 'Minimize'),
+              WindowCaptionAction.minimize, window.minimize),
           if (!window.isMini)
             button(
                 context.localeText(window.isMaximized ? '还原' : '最大化',
                     window.isMaximized ? 'Restore size' : 'Maximize'),
                 window.isMaximized
-                    ? Icons.filter_none_rounded
-                    : Icons.crop_square_rounded,
+                    ? WindowCaptionAction.restore
+                    : WindowCaptionAction.maximize,
                 window.toggleMaximize),
-          button(context.localeText('关闭', 'Close'), Icons.close_rounded,
+          button(context.localeText('关闭', 'Close'), WindowCaptionAction.close,
               window.close,
               close: true),
         ]));
   }
+}
+
+enum WindowCaptionAction { mini, restore, minimize, maximize, close }
+
+class WindowCaptionIcon extends StatelessWidget {
+  const WindowCaptionIcon(this.action, {super.key});
+  final WindowCaptionAction action;
+
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+        size: const Size.square(18),
+        painter: _WindowCaptionPainter(
+            action,
+            IconTheme.of(context).color ??
+                Theme.of(context).colorScheme.onSurface),
+      );
+}
+
+class _WindowCaptionPainter extends CustomPainter {
+  const _WindowCaptionPainter(this.action, this.color);
+  final WindowCaptionAction action;
+  final Color color;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 窗口控制直接绘制线条，不依赖发布版图标字体。
+    final paint = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.5
+      ..strokeJoin = StrokeJoin.round;
+    canvas.save();
+    canvas.scale(size.width / 18, size.height / 18);
+    switch (action) {
+      case WindowCaptionAction.minimize:
+        canvas.drawLine(const Offset(3, 9), const Offset(15, 9), paint);
+      case WindowCaptionAction.maximize:
+        canvas.drawRect(const Rect.fromLTWH(3, 3, 12, 12), paint);
+      case WindowCaptionAction.close:
+        canvas.drawLine(const Offset(4, 4), const Offset(14, 14), paint);
+        canvas.drawLine(const Offset(14, 4), const Offset(4, 14), paint);
+      case WindowCaptionAction.restore:
+        canvas.drawRect(const Rect.fromLTWH(3, 6, 9, 9), paint);
+        canvas.drawPath(
+            Path()
+              ..moveTo(6, 6)
+              ..lineTo(6, 3)
+              ..lineTo(15, 3)
+              ..lineTo(15, 12)
+              ..lineTo(12, 12),
+            paint);
+      case WindowCaptionAction.mini:
+        canvas.drawRect(const Rect.fromLTWH(2, 3, 14, 12), paint);
+        canvas.drawRect(const Rect.fromLTWH(9, 9, 5, 4), paint);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_WindowCaptionPainter oldDelegate) =>
+      oldDelegate.action != action || oldDelegate.color != color;
 }

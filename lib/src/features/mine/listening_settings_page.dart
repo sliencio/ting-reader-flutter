@@ -14,12 +14,16 @@ class ListeningSettingsPage extends StatefulWidget {
     required this.openManagement,
     required this.hasPluginPages,
     required this.forceRefresh,
+    this.embedded = false,
+    this.navigation,
   });
 
   final ValueChanged<AppDestination> go;
   final VoidCallback openManagement;
   final bool hasPluginPages;
   final Future<void> Function() forceRefresh;
+  final bool embedded;
+  final Widget? navigation;
 
   @override
   State<ListeningSettingsPage> createState() => _ListeningSettingsPageState();
@@ -76,11 +80,13 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
         constraints: const BoxConstraints(maxWidth: 840),
         child: PageListView(
           children: [
-            Text(
-              context.localeText('设置', 'Settings'),
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 24),
+            if (!widget.embedded)
+              Text(
+                context.localeText('设置', 'Settings'),
+                style: Theme.of(context).textTheme.headlineMedium,
+              ),
+            if (!widget.embedded) const SizedBox(height: 24),
+            if (widget.navigation != null) widget.navigation!,
             if (DesktopWindow.instance.supported)
               group([
                 ListTile(
@@ -212,6 +218,12 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                     context.localeText('切换账号或服务器', 'Switch account or server')),
                 onTap: app.logout,
               ),
+              if (DesktopWindow.instance.supported)
+                ListTile(
+                  leading: const Icon(Icons.power_settings_new_rounded),
+                  title: Text(context.localeText('退出软件', 'Exit application')),
+                  onTap: DesktopWindow.instance.requestExit,
+                ),
             ]),
             const SafeBottomSpacer(),
           ],

@@ -75,6 +75,9 @@ test/*
 !test/book_details_cache_test.dart
 !test/desktop_window_test.dart
 !test/continue_listening_test.dart
+!test/window_caption_rendering_test.dart
+!test/chapter_read_marks_test.dart
+!test/settings_push_layout_test.dart
 preview_screenshots/
 real_compare_screenshots/
 web_compare_screenshots/
