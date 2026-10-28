@@ -333,8 +333,22 @@ class DownloadStorage {
     );
     try {
       await staging.writeAsBytes(bytes, flush: true);
-      checkActive?.call();
-      await staging.rename(target.path);
+      for (var attempt = 0;; attempt++) {
+        checkActive?.call();
+        try {
+          await staging.rename(target.path);
+          break;
+        } on FileSystemException catch (error) {
+          // Windows 的短暂文件占用可能阻止原子替换，保留旧文件并有限重试。
+          if (!Platform.isWindows ||
+              attempt >= 4 ||
+              !const [5, 32, 33].contains(error.osError?.errorCode)) {
+            rethrow;
+          }
+          await Future<void>.delayed(
+              Duration(milliseconds: 20 * (1 << attempt)));
+        }
+      }
     } finally {
       if (await staging.exists()) await staging.delete();
     }

@@ -15,7 +15,7 @@ import 'src/features/app_shell.dart';
 import 'src/shared/app_scope.dart';
 import 'src/shared/common/common_widgets.dart';
 import 'src/core/services/desktop_window.dart';
-import 'src/features/player/small_player_window.dart';
+import 'src/features/player/desktop_window_host.dart';
 import 'src/features/player/mini_player.dart';
 
 final _appNavigatorKey = GlobalKey<NavigatorState>();
@@ -84,6 +84,15 @@ Future<void> main() async {
   final appState = AppState();
   await DesktopWindow.instance.initialize(appState);
   DesktopWindow.instance.onCloseRequested = () => _handleWindowClose(appState);
+  DesktopWindow.instance.onExitRequested = () async {
+    final context = _appNavigatorKey.currentContext;
+    if (context != null && context.mounted) {
+      await AppScope.playerOf(context)
+          .sendProgress()
+          .timeout(const Duration(seconds: 2), onTimeout: () {});
+    }
+    await DesktopWindow.instance.exit();
+  };
   final downloadState = DownloadState(appState);
   final playerState = PlayerState(appState, downloadState);
 
@@ -162,34 +171,16 @@ class TingReaderApp extends StatelessWidget {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           builder: (context, child) {
-            final content = AnimatedBuilder(
-              animation: DesktopWindow.instance,
-              builder: (context, _) {
-                final window = DesktopWindow.instance;
-                if (!window.isMini) {
-                  window.normalSize = MediaQuery.sizeOf(context);
-                }
-                return Stack(fit: StackFit.expand, children: [
-                  Offstage(
-                      offstage: window.isMini,
-                      child: OverflowBox(
-                          minWidth: window.normalSize.width,
-                          maxWidth: window.normalSize.width,
-                          minHeight: window.normalSize.height,
-                          maxHeight: window.normalSize.height,
-                          child: child ?? const SizedBox.shrink())),
-                  if (window.isMini)
-                    SmallPlayerWindow(openChapters: () async {
-                      await window.setMini(false);
-                      final context = _appNavigatorKey.currentContext;
-                      if (context != null && context.mounted) {
-                        await showPlayerChapters(
-                            context, AppScope.playerOf(context));
-                      }
-                    }),
-                ]);
-              },
-            );
+            final content = DesktopWindowHost(
+                child: child ?? const SizedBox.shrink(),
+                openChapters: () async {
+                  await DesktopWindow.instance.setMini(false);
+                  final context = _appNavigatorKey.currentContext;
+                  if (context != null && context.mounted) {
+                    await showPlayerChapters(
+                        context, AppScope.playerOf(context));
+                  }
+                });
             final brightness = Theme.of(context).brightness;
             final isDark = brightness == Brightness.dark;
             final background = Theme.of(context).scaffoldBackgroundColor;

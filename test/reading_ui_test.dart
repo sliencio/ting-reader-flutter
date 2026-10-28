@@ -19,6 +19,10 @@ import 'package:ting_reader_flutter/src/features/mine/history_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/mine_page.dart';
 import 'package:ting_reader_flutter/src/features/player/mini_player.dart';
 import 'package:ting_reader_flutter/src/features/player/small_player_window.dart';
+import 'package:ting_reader_flutter/src/features/player/desktop_window_host.dart';
+import 'package:ting_reader_flutter/src/core/services/desktop_window.dart';
+import 'package:flutter/services.dart';
+import 'dart:ui' show PointerDeviceKind;
 import 'package:flutter/foundation.dart';
 import 'package:ting_reader_flutter/src/features/login_page.dart';
 import 'package:ting_reader_flutter/src/features/admin/users/admin_users_page.dart';
@@ -331,6 +335,8 @@ class _ReadingPlayer extends ChangeNotifier implements PlayerState {
   int playCalls = 0;
   int seekCalls = 0;
   int resumeCalls = 0;
+  int nextCalls = 0;
+  int previousCalls = 0;
   @override
   Book? currentBook;
   @override
@@ -373,6 +379,11 @@ class _ReadingPlayer extends ChangeNotifier implements PlayerState {
     resumeCalls++;
     isPlaying = !isPlaying;
   }
+
+  @override
+  Future<void> nextChapter({bool fromOutro = false}) async => nextCalls++;
+  @override
+  Future<void> previousChapter() async => previousCalls++;
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
@@ -826,9 +837,6 @@ void main() {
       addTearDown(player.dispose);
       await _pump(tester, app, player, const MiniPlayer());
       expect(find.byTooltip('Chapters'), findsOneWidget);
-      if (width >= 840) {
-        expect(find.byTooltip('Mini window'), findsOneWidget);
-      }
       expect(tester.takeException(), isNull);
       await tester.tap(find.byTooltip('Chapters'));
       await tester.pump();
@@ -838,6 +846,97 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
   }
+
+  testWidgets(
+      'full desktop host keeps the player visible through native resize',
+      (tester) async {
+    const channel = MethodChannel('ting_reader/window');
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (_) async => null);
+    addTearDown(() => TestDefaultBinaryMessengerBinding
+        .instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, null));
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 720);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final app = _ReadingApp();
+    final player = _ReadingPlayer()
+      ..currentBook = book
+      ..currentChapter = chapter;
+    final downloads = DownloadState(app);
+    addTearDown(app.dispose);
+    addTearDown(player.dispose);
+    addTearDown(downloads.dispose);
+    final normalKey = GlobalKey<ScaffoldState>();
+    final window = DesktopWindow.instance;
+    var exits = 0;
+    window.onExitRequested = () async => exits++;
+    try {
+      await tester.pumpWidget(AppScope(
+          appState: app,
+          downloadState: downloads,
+          playerState: player,
+          child: MaterialApp(
+              locale: const Locale('en'),
+              localizationsDelegates: AppLocalizations.localizationsDelegates,
+              supportedLocales: AppLocalizations.supportedLocales,
+              builder: (_, child) =>
+                  DesktopWindowHost(child: child!, openChapters: () async {}),
+              home:
+                  Scaffold(key: normalKey, body: const Text('Normal page')))));
+      await tester.pumpAndSettle();
+      final normalState = normalKey.currentState;
+      final miniButton = find.byTooltip('Mini window');
+      final minimizeButton = find.byTooltip('Minimize');
+      expect(
+          tester.getTopLeft(minimizeButton).dx -
+              tester.getTopLeft(miniButton).dx,
+          44);
+      await tester.tap(miniButton);
+      tester.view.physicalSize = const Size(560, 156);
+      await tester.pumpAndSettle();
+      expect(find.byType(SmallPlayerWindow), findsOneWidget);
+      expect(find.text('Book'), findsOneWidget);
+      expect(find.text('Chapter'), findsOneWidget);
+      expect(find.byType(ErrorWidget), findsNothing);
+      final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await mouse.addPointer();
+      await mouse.moveTo(tester.getCenter(find.byTooltip('Next')));
+      await tester.pump(const Duration(seconds: 1));
+      expect(tester.takeException(), isNull);
+      await mouse.removePointer();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Next'));
+      await tester.pump();
+      expect(player.nextCalls, 1);
+      await tester.tap(find.byTooltip('Previous'));
+      await tester.pump();
+      expect(player.previousCalls, 1);
+      await tester.tap(find.byTooltip('Play or pause'));
+      await tester.pump();
+      expect(player.resumeCalls, 1);
+      await tester.tap(find.byTooltip('Restore window'));
+      tester.view.physicalSize = const Size(1280, 720);
+      await tester.pumpAndSettle();
+      expect(identical(normalKey.currentState, normalState), isTrue);
+      window.closeBehavior = 'minimize';
+      await tester.tap(find.byTooltip('Window menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Exit application'));
+      await tester.pumpAndSettle();
+      expect(exits, 1);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(tester.takeException(), isNull);
+    } finally {
+      await window.setMini(false);
+      window.closeBehavior = 'ask';
+      window.onExitRequested = null;
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   testWidgets('small player fits a compact native window', (tester) async {
     tester.view.devicePixelRatio = 1;

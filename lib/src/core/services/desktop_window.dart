@@ -11,7 +11,9 @@ class DesktopWindow extends ChangeNotifier {
   bool isMini = false;
   Size normalSize = const Size(1280, 720);
   String closeBehavior = 'ask';
+  bool isMaximized = false;
   Future<void> Function()? onCloseRequested;
+  Future<void> Function()? onExitRequested;
   AppState? _app;
   VoidCallback? _syncPreferences;
 
@@ -22,6 +24,13 @@ class DesktopWindow extends ChangeNotifier {
     _app = app;
     _channel.setMethodCallHandler((call) async {
       if (call.method == 'closeRequested') await onCloseRequested?.call();
+      if (call.method == 'maximizedChanged') {
+        final value = call.arguments == true;
+        if (isMaximized != value) {
+          isMaximized = value;
+          notifyListeners();
+        }
+      }
     });
     void sync() {
       final value = app.settings['desktop_close_behavior']?.toString();
@@ -52,6 +61,22 @@ class DesktopWindow extends ChangeNotifier {
 
   Future<void> minimize() => _channel.invokeMethod<void>('minimize');
   Future<void> exit() => _channel.invokeMethod<void>('exit');
+  Future<void> close() => _channel.invokeMethod<void>('close');
+  Future<void> startDragging() => _channel.invokeMethod<void>('startDragging');
+
+  Future<void> toggleMaximize() async {
+    isMaximized = await _channel.invokeMethod<bool>('toggleMaximize') ?? false;
+    notifyListeners();
+  }
+
+  Future<void> requestExit() async {
+    final handler = onExitRequested;
+    if (handler != null) {
+      await handler();
+    } else {
+      await exit();
+    }
+  }
 
   @override
   void dispose() {

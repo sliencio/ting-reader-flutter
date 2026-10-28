@@ -8,7 +8,6 @@ import '../../core/models/models.dart';
 import '../../core/state/app_state.dart';
 import '../../core/state/download_state.dart';
 import '../../core/state/player_state.dart';
-import '../../core/services/desktop_window.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/chapter_sort.dart';
 import '../../core/utils/formatters.dart';
@@ -147,7 +146,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                     final centerHorizontalPadding =
                         constraints.maxWidth >= 1024 ? 24.0 : 12.0;
                     final rightWidth =
-                        constraints.maxWidth >= 1024 ? 220.0 : 180.0;
+                        constraints.maxWidth >= 1024 ? 190.0 : 150.0;
                     final row = Row(
                       children: [
                         GestureDetector(
@@ -308,16 +307,6 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                   onPressed: () =>
                                       showPlayerChapters(context, player),
                                 ),
-                                if (DesktopWindow.instance.supported)
-                                  IconButton(
-                                    tooltip: context.localeText(
-                                        '小窗模式', 'Mini window'),
-                                    icon: Icon(
-                                        Icons.picture_in_picture_alt_rounded,
-                                        color: subduedAccent),
-                                    onPressed: () =>
-                                        DesktopWindow.instance.setMini(true),
-                                  ),
                                 _MiniIconButton(
                                   icon: player.volume <= 0
                                       ? Icons.volume_off_rounded

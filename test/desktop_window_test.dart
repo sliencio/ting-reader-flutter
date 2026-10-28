@@ -43,6 +43,19 @@ void main() {
     expect(window.isMini, isFalse);
   });
 
+  test('caption controls and explicit exit remain available in minimize mode',
+      () async {
+    final window = DesktopWindow()..closeBehavior = 'minimize';
+    addTearDown(window.dispose);
+    await window.close();
+    await window.startDragging();
+    await window.toggleMaximize();
+    await window.requestExit();
+    expect(calls.map((call) => call.method),
+        ['close', 'startDragging', 'toggleMaximize', 'exit']);
+    expect(window.closeBehavior, 'minimize');
+  });
+
   test('saved close preference reaches the native window', () async {
     final app = AppState()..settings = {'desktop_close_behavior': 'minimize'};
     final window = DesktopWindow();

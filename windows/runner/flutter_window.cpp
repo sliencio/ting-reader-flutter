@@ -4,6 +4,7 @@
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "window_tasks.h"
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -27,6 +28,14 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  const HWND window = GetHandle();
+  // 标题栏由 Flutter 绘制，保留系统边框和任务栏菜单。
+  SetWindowLongPtr(window, GWL_STYLE, GetWindowLongPtr(window, GWL_STYLE) & ~WS_CAPTION);
+  SetWindowPos(window, nullptr, 0, 0, 0, 0,
+      SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+  const HMENU system_menu = GetSystemMenu(window, FALSE);
+  AppendMenu(system_menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenu(system_menu, MF_STRING, kExitSystemMenuCommand, L"退出软件");
 
   window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
       flutter_controller_->engine()->messenger(), "ting_reader/window",
@@ -44,6 +53,15 @@ bool FlutterWindow::OnCreate() {
           close_behavior_ = *value;
         } else if (method == "minimize") {
           ShowWindow(GetHandle(), SW_MINIMIZE);
+        } else if (method == "close") {
+          PostMessage(GetHandle(), WM_CLOSE, 0, 0);
+        } else if (method == "startDragging") {
+          ReleaseCapture();
+          SendMessage(GetHandle(), WM_NCLBUTTONDOWN, HTCAPTION, 0);
+        } else if (method == "toggleMaximize") {
+          ShowWindow(GetHandle(), IsZoomed(GetHandle()) ? SW_RESTORE : SW_MAXIMIZE);
+          result->Success(flutter::EncodableValue(IsZoomed(GetHandle()) != FALSE));
+          return;
         } else if (method == "exit") {
           close_behavior_ = "exit";
           PostMessage(GetHandle(), WM_CLOSE, 0, 0);
@@ -79,6 +97,23 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  if (message == kExitApplicationMessage ||
+      (message == WM_SYSCOMMAND && (wparam & 0xFFF0) == kExitSystemMenuCommand)) {
+    close_behavior_ = "exit";
+    PostMessage(hwnd, WM_CLOSE, 0, 0);
+    return 0;
+  }
+  if (message == WM_SIZE && window_channel_ && wparam != SIZE_MINIMIZED) {
+    window_channel_->InvokeMethod("maximizedChanged",
+        std::make_unique<flutter::EncodableValue>(wparam == SIZE_MAXIMIZED));
+  }
+  if (message == WM_GETMINMAXINFO && mini_mode_) {
+    auto limits = reinterpret_cast<MINMAXINFO*>(lparam);
+    const auto dpi = GetDpiForWindow(hwnd);
+    limits->ptMinTrackSize.x = MulDiv(420, dpi, 96);
+    limits->ptMinTrackSize.y = MulDiv(140, dpi, 96);
+    return 0;
+  }
   if (message == WM_CLOSE) {
     if (close_behavior_ == "minimize") {
       ShowWindow(hwnd, SW_MINIMIZE);
@@ -118,7 +153,7 @@ void FlutterWindow::SetMiniMode(bool enabled) {
     GetWindowRect(window, &bounds);
     const auto dpi = GetDpiForWindow(window);
     SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
-                 MulDiv(400, dpi, 96), MulDiv(260, dpi, 96), SWP_SHOWWINDOW);
+                 MulDiv(560, dpi, 96), MulDiv(156, dpi, 96), SWP_SHOWWINDOW);
   } else {
     SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
