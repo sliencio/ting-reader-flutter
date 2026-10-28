@@ -34,6 +34,25 @@ void main() {
     expect(calls.map((call) => call.arguments), [true, false]);
   });
 
+  for (final platform in TargetPlatform.values) {
+    test('desktop window capability is scoped correctly on $platform',
+        () async {
+      debugDefaultTargetPlatformOverride = platform;
+      final window = DesktopWindow();
+      addTearDown(window.dispose);
+      final desktop = [
+        TargetPlatform.windows,
+        TargetPlatform.macOS,
+        TargetPlatform.linux
+      ].contains(platform);
+      expect(window.supported, desktop);
+      expect(window.usesCustomTitleBar, platform == TargetPlatform.windows);
+      await window.setMini(true);
+      expect(window.isMini, desktop);
+      expect(calls.length, desktop ? 1 : 0);
+    });
+  }
+
   test('failed native resize restores the previous mini state', () async {
     binding.defaultBinaryMessenger.setMockMethodCallHandler(
         channel, (_) async => throw PlatformException(code: 'resize_failed'));

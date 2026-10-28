@@ -85,12 +85,16 @@ void main() {
     final (app, _) = await _pump(tester, const Size(390, 844));
     final shelf = tester.state(find.byType(BookshelfPage));
     final revision = app.bookDetailsCache.revision;
-    await tester.tap(find.text('Settings'));
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Settings').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Force refresh'));
     await tester.pumpAndSettle();
     expect(app.bookDetailsCache.revision, revision + 1);
-    await tester.tap(find.text('Bookshelf'));
+    await tester.tap(find.byTooltip('App menu'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Bookshelf').last);
     await tester.pumpAndSettle();
     expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isFalse);
     expect(tester.takeException(), isNull);
@@ -103,26 +107,38 @@ void main() {
       final (app, player) = await _pump(tester, size);
       final shelf = tester.state(find.byType(BookshelfPage));
       final requests = List<String>.of(app.client.requests);
+      expect(find.text('Settings'), findsNothing);
+      expect(find.text('Downloads'), findsNothing);
       expect(find.byType(DownloadsPage, skipOffstage: false), findsNothing);
 
-      await tester.tap(find.text('Settings'));
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Settings').last);
       await tester.pumpAndSettle();
       expect(find.text('Playback & appearance'), findsOneWidget);
       expect(find.byType(DownloadsPage, skipOffstage: false), findsNothing);
       player.notifyListeners();
       await tester.pump();
-      await tester.tap(find.text('Bookshelf'));
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Bookshelf').last);
       await tester.pumpAndSettle();
       expect(
           identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
       expect(app.client.requests, requests);
 
-      await tester.tap(find.text('Downloads'));
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Downloads').last);
       await tester.pumpAndSettle();
       final downloads = tester.state(find.byType(DownloadsPage));
-      await tester.tap(find.text('Bookshelf'));
+      await tester.tap(find.byTooltip('App menu'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Downloads'));
+      await tester.tap(find.text('Bookshelf').last);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('App menu'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Downloads').last);
       await tester.pumpAndSettle();
       expect(identical(tester.state(find.byType(DownloadsPage)), downloads),
           isTrue);

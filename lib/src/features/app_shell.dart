@@ -21,6 +21,7 @@ import 'mine/bookmarks_page.dart';
 import 'mine/personalization/personalization_page.dart';
 import 'playlists/playlists_page.dart';
 import '../core/models/models.dart';
+import '../core/services/desktop_window.dart';
 import '../core/state/navigation_state.dart';
 import '../core/plugin_extensions/types.dart';
 import '../core/theme/app_theme.dart';
@@ -31,12 +32,6 @@ import '../shared/plugin_extensions/plugin_extension_host.dart';
 import 'player/mini_player.dart';
 
 part 'shell_mobile_navigation.dart';
-
-part 'shell_desktop_navigation.dart';
-
-const _expandedSidebarWidth = 288.0;
-const _collapsedSidebarWidth = 80.0;
-const _desktopSidebarContentGap = 20.0;
 
 typedef _NavigationEntry = ({
   AppDestination destination,
@@ -341,8 +336,6 @@ class _AppShellState extends State<AppShell> {
           },
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final desktop = constraints.maxWidth >= 1280;
-              final sidebarCollapsed = appState.sidebarCollapsed;
               final navDestination = _navigation.navDestination;
               return AnimatedBuilder(
                 animation: AppScope.playerOf(context),
@@ -353,55 +346,81 @@ class _AppShellState extends State<AppShell> {
                   final showMiniPlayer = player.hasChapter &&
                       !player.isExpanded &&
                       !hidesMiniPlayer(navDestination);
-                  final pluginExtensionBottom = showMiniPlayer
-                      ? (desktop ? 128.0 : 150.0 + bottomInset)
-                      : (desktop ? 24.0 : 84.0 + bottomInset);
+                  final pluginExtensionBottom =
+                      showMiniPlayer ? 110.0 + bottomInset : 24.0 + bottomInset;
                   return Stack(
                     children: [
                       Scaffold(
-                        body: Row(
-                          children: [
-                            if (desktop)
-                              _DesktopSidebar(
-                                go: _go,
-                                current: navDestination,
-                                collapsed: sidebarCollapsed,
-                                onToggleCollapsed: () =>
-                                    appState.updateLocalSettings({
-                                  'sidebar_collapsed': !sidebarCollapsed,
-                                }),
-                              ),
-                            Expanded(
-                              child: SafeArea(
-                                top: !desktop,
-                                bottom: false,
-                                child: Column(
-                                  children: [
-                                    Expanded(child: _page()),
-                                    if (!desktop)
-                                      _BottomNav(
-                                        current: navDestination,
-                                        go: _go,
-                                      ),
-                                  ],
+                        body: SafeArea(
+                          bottom: false,
+                          child: Column(children: [
+                            Row(children: [
+                              if (!appState.offlineMode &&
+                                  !_navigation.hasDetail &&
+                                  _primaryDestinations.contains(_destination) &&
+                                  _destination != AppDestination.bookshelf)
+                                IconButton(
+                                  tooltip: context.localeText('返回', 'Back'),
+                                  icon: const Icon(Icons.arrow_back_rounded),
+                                  onPressed: () {
+                                    if (!_handleSystemBack()) {
+                                      _go(AppDestination.bookshelf);
+                                    }
+                                  },
                                 ),
+                              const Spacer(),
+                              if (DesktopWindow.instance.supported &&
+                                  !DesktopWindow.instance.usesCustomTitleBar)
+                                IconButton(
+                                  tooltip:
+                                      context.localeText('小窗模式', 'Mini window'),
+                                  icon: const Icon(
+                                      Icons.picture_in_picture_alt_rounded),
+                                  onPressed: () =>
+                                      DesktopWindow.instance.setMini(true),
+                                ),
+                              PopupMenuButton<AppDestination>(
+                                tooltip: context.localeText('更多功能', 'App menu'),
+                                icon: const Icon(Icons.more_horiz_rounded),
+                                onSelected: _go,
+                                itemBuilder: (context) => [
+                                  for (final entry
+                                      in _navigationEntries(context))
+                                    if (!appState.offlineMode ||
+                                        entry.destination ==
+                                            AppDestination.downloads)
+                                      PopupMenuItem(
+                                        value: entry.destination,
+                                        child: Row(children: [
+                                          Icon(entry.icon, size: 20),
+                                          const SizedBox(width: 12),
+                                          Text(entry.label),
+                                        ]),
+                                      ),
+                                  if (appState.offlineMode)
+                                    PopupMenuItem(
+                                      onTap: appState.logout,
+                                      child: Text(context.l10n.navReturnLogin),
+                                    ),
+                                  if (DesktopWindow.instance.supported)
+                                    PopupMenuItem(
+                                      onTap: DesktopWindow.instance.requestExit,
+                                      child: Text(context.localeText(
+                                          '退出软件', 'Exit application')),
+                                    ),
+                                ],
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 8),
+                            ]),
+                            Expanded(child: _page()),
+                          ]),
                         ),
                       ),
                       if (showMiniPlayer)
                         Positioned(
-                          left: desktop
-                              ? (sidebarCollapsed
-                                      ? _collapsedSidebarWidth
-                                      : _expandedSidebarWidth) +
-                                  _desktopSidebarContentGap
-                              : (collapsedMini ? 24 : 12),
-                          right: collapsedMini ? null : (desktop ? 20 : 12),
-                          bottom: desktop
-                              ? 20
-                              : 64 + bottomInset + (collapsedMini ? 20 : 0),
+                          left: collapsedMini ? 24 : 12,
+                          right: collapsedMini ? null : 12,
+                          bottom: bottomInset + (collapsedMini ? 20 : 12),
                           child: const MiniPlayer(),
                         ),
                       if (!player.isExpanded && !_mobileAdminDrawerOpen)
@@ -421,17 +440,6 @@ class _AppShellState extends State<AppShell> {
                             pluginPages: _sidebarPluginPages,
                             activePluginPageId: _activePluginPage?.id,
                             onOpenPluginPage: _openPluginPage,
-                          ),
-                        ),
-                      if (desktop && sidebarCollapsed && !player.isExpanded)
-                        Positioned(
-                          left: _collapsedSidebarWidth - 22,
-                          top: MediaQuery.paddingOf(context).top + 22,
-                          child: _SidebarToggleButton(
-                            collapsed: true,
-                            onPressed: () => appState.updateLocalSettings({
-                              'sidebar_collapsed': false,
-                            }),
                           ),
                         ),
                       if (player.isExpanded)
@@ -637,80 +645,13 @@ class _AppShellState extends State<AppShell> {
   }
 }
 
-class _NavTile extends StatelessWidget {
-  const _NavTile({
-    required this.icon,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.collapsed = false,
-  });
-
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-  final bool collapsed;
-
-  @override
-  Widget build(BuildContext context) {
-    final tile = Material(
-      color: selected ? AppColors.primary600 : Colors.transparent,
-      elevation: selected ? 8 : 0,
-      shadowColor: AppColors.primary500.withValues(alpha: 0.3),
-      borderRadius: BorderRadius.circular(12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
-        child: SizedBox(
-          height: 46,
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 16),
-            child: Row(
-              mainAxisAlignment: collapsed
-                  ? MainAxisAlignment.center
-                  : MainAxisAlignment.start,
-              children: [
-                Icon(
-                  icon,
-                  color: selected ? Colors.white : context.mutedText,
-                  size: 20,
-                ),
-                if (!collapsed) ...[
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: selected ? Colors.white : context.mutedText,
-                      ),
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 4),
-      child: collapsed ? Tooltip(message: label, child: tile) : tile,
-    );
-  }
-}
-
 class _GroupLabel extends StatelessWidget {
-  const _GroupLabel(this.text, {this.collapsed = false});
+  const _GroupLabel(this.text);
 
   final String text;
-  final bool collapsed;
 
   @override
   Widget build(BuildContext context) {
-    if (collapsed) return const SizedBox(height: 8);
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
       child: Text(

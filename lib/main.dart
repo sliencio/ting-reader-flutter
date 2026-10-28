@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -277,6 +279,12 @@ class _StartupGateState extends State<StartupGate> {
     return AnimatedBuilder(
       animation: appState,
       builder: (context, _) {
+        if (appState.isAuthenticated) {
+          final player = AppScope.playerOf(context);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) unawaited(player.restoreLastPlayback());
+          });
+        }
         return appState.isAuthenticated ? const AppShell() : const LoginPage();
       },
     );

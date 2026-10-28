@@ -15,6 +15,7 @@ import '../api/api_error.dart';
 import '../models/models.dart';
 import '../utils/chapter_sort.dart';
 import '../utils/urls.dart';
+import '../services/playback_resume_store.dart';
 import 'app_state.dart';
 import 'download_state.dart';
 import 'gateway_media_guard.dart';
@@ -26,6 +27,7 @@ part 'player/player_focus.dart';
 part 'player/player_playback.dart';
 part 'player/player_gateway.dart';
 part 'player/player_source.dart';
+part 'player/player_resume.dart';
 
 class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   PlayerState(
@@ -52,6 +54,10 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
         _furthestChapterPosition = currentTime;
       }
       _handleSkipOutro();
+      if (DateTime.now().difference(_lastResumeSave).inSeconds >= 5) {
+        _lastResumeSave = DateTime.now();
+        unawaited(_saveResumeRecord());
+      }
       notifyListeners();
     });
     _durationSub = _audio.durationStream.listen((durationValue) {
@@ -161,6 +167,11 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   );
   final _TranscodeClock _clock = _TranscodeClock();
   bool _disposed = false;
+  final _resumeStore = PlaybackResumeStore();
+  DateTime _lastResumeSave = DateTime(1970);
+  String? _resumeIdentity;
+  bool _selectionPending = false;
+  Future<void> restoreLastPlayback() => _restoreLastPlayback();
   void _notifyIfActive() {
     if (!_disposed) notifyListeners();
   }
@@ -364,8 +375,13 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  Future<void> sendProgress({double? playbackStart}) =>
-      _progress.send(playbackStart: playbackStart);
+  Future<void> sendProgress({double? playbackStart}) async {
+    final local = _saveResumeRecord();
+    final remote = _selectionPending
+        ? Future<void>.value()
+        : _progress.send(playbackStart: playbackStart);
+    await Future.wait([local, remote]);
+  }
 
   void _closeProgressSocket() => _progress.closeSocket();
 

@@ -9,6 +9,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio_background/just_audio_background.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ting_reader_flutter/src/core/services/playback_resume_store.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/models/models.dart';
 import 'package:ting_reader_flutter/src/core/state/app_state.dart';
@@ -21,13 +23,18 @@ class _PlaybackApi extends ApiClient {
   final progressUpdates = <Object?>[];
   final sessionProbes = <String>[];
   Future<void>? progressGate;
+  final responses = <String, dynamic>{};
+  Future<void>? recentGate;
 
   @override
   Future<Response<dynamic>> get(String path,
       {Map<String, dynamic>? params, CancelToken? cancelToken}) async {
     sessionProbes.add(path);
+    if (path == '/api/progress/recent') await recentGate;
     return Response(
-        requestOptions: RequestOptions(path: path), data: {}, statusCode: 200);
+        requestOptions: RequestOptions(path: path),
+        data: responses[path] ?? {},
+        statusCode: 200);
   }
 
   @override
@@ -339,6 +346,7 @@ void main() {
   });
 
   setUp(() {
+    SharedPreferences.setMockInitialValues({});
     playerDisposed = false;
     native = _NativeAudio(binding)..install();
     app = _PlaybackApp()
@@ -361,6 +369,142 @@ void main() {
     unawaited(player.playChapter(book, [item], item));
     await waitForPlayback(() => native.playCount == 1 && player.isPlaying);
   }
+
+  String resumeIdentity() => '${app.serverUrl}:${app.fnId}:${app.user?.id}';
+
+  Future<void> seedResume({double position = 42}) async {
+    final item = chapter('/server/chapter.mp3');
+    await PlaybackResumeStore().write(
+        resumeIdentity(),
+        PlaybackResumeRecord(
+            book, [item], item.id, position, DateTime.utc(2020)));
+  }
+
+  test('startup selects local chapter without loading audio or playing',
+      () async {
+    await seedResume();
+    await player.restoreLastPlayback();
+    expect(player.hasChapter, isTrue);
+    expect(player.currentBook?.id, book.id);
+    expect(player.currentTime, 42);
+    expect(player.isMiniCollapsed, isFalse);
+    expect(player.isPlaying, isFalse);
+    expect(native.loadedUris, isEmpty);
+    expect(native.playCount, 0);
+    await player.togglePlay();
+    await waitForPlayback(() => native.playCount == 1);
+    expect(native.playCount, 1);
+    expect(native.initialPositions.single, 42000000);
+  });
+
+  test('startup recovers remote history on a device without a local record',
+      () async {
+    app.offlineMode = false;
+    app.api.responses['/api/progress/recent'] = [
+      {
+        'book_id': 'book',
+        'chapter_id': 'chapter',
+        'position': 65,
+        'updated_at': '2026-01-01T00:00:00Z'
+      }
+    ];
+    app.api.responses['/api/books/book'] = {
+      'id': 'book',
+      'title': 'Restored book'
+    };
+    app.api.responses['/api/books/book/chapters'] = [
+      {
+        'id': 'chapter',
+        'book_id': 'book',
+        'title': 'Restored chapter',
+        'duration': 600,
+        'chapter_index': 1,
+        'path': '/server/chapter.mp3'
+      }
+    ];
+    await player.restoreLastPlayback();
+    expect(player.currentBook?.title, 'Restored book');
+    expect(player.currentChapter?.title, 'Restored chapter');
+    expect(player.currentTime, 65);
+    expect(native.loadedUris, isEmpty);
+    expect(native.playCount, 0);
+    expect(app.api.progressUpdates, isEmpty);
+  });
+
+  test('delayed history cannot overwrite a newly selected chapter', () async {
+    app.offlineMode = false;
+    final gate = Completer<void>();
+    app.api.recentGate = gate.future;
+    app.api.responses['/api/progress/recent'] = [
+      {'book_id': 'old', 'chapter_id': 'old-chapter', 'position': 10}
+    ];
+    final restore = player.restoreLastPlayback();
+    await waitForPlayback(
+        () => app.api.sessionProbes.contains('/api/progress/recent'));
+    final item = chapter('/server/chapter.mp3');
+    await player.playChapter(book, [item], item, startAt: 100);
+    gate.complete();
+    await restore;
+    expect(player.currentChapter?.id, item.id);
+    expect(app.api.sessionProbes, isNot(contains('/api/books/old')));
+  });
+
+  test('changing account cannot expose another account resume record',
+      () async {
+    await seedResume();
+    await player.restoreLastPlayback();
+    expect(player.hasChapter, isTrue);
+    app.user = const User(id: 'other', username: 'other', role: 'user');
+    await player.restoreLastPlayback();
+    expect(player.hasChapter, isFalse);
+    expect(player.currentBook, isNull);
+    expect(native.playCount, 0);
+  });
+
+  test('seeking a restored selection stays local until playback', () async {
+    await seedResume();
+    await player.restoreLastPlayback();
+    await player.seek(90);
+    expect(native.loadedUris, isEmpty);
+    expect(native.playCount, 0);
+    expect(app.api.progressUpdates, isEmpty);
+    final saved = await PlaybackResumeStore().read(resumeIdentity());
+    expect(saved?.position, 90);
+    await player.togglePlay();
+    await waitForPlayback(() => native.playCount == 1);
+    expect(native.initialPositions.single, 90000000);
+  });
+
+  test('older server progress does not replace a newer local record', () async {
+    await seedResume();
+    app.offlineMode = false;
+    app.api.responses['/api/progress/recent'] = [
+      {
+        'book_id': 'old',
+        'chapter_id': 'old-chapter',
+        'position': 5,
+        'updated_at': '2019-01-01T00:00:00Z'
+      }
+    ];
+    await player.restoreLastPlayback();
+    expect(player.currentBook?.id, book.id);
+    expect(player.currentTime, 42);
+    expect(app.api.sessionProbes, isNot(contains('/api/books/old')));
+    expect(native.playCount, 0);
+  });
+
+  test('paused progress is persisted with book and chapter metadata', () async {
+    final item = chapter('/server/chapter.mp3');
+    await player.playChapter(book, [item], item, startAt: 70);
+    await player.pause();
+    await player.sendProgress();
+    final saved = await PlaybackResumeStore().read(resumeIdentity());
+    expect(saved?.book.title, book.title);
+    expect(saved?.chapter?.id, item.id);
+    expect(saved?.position, closeTo(70, 1));
+    expect(await PlaybackResumeStore().read('another-server:another-user'),
+        isNull);
+  });
 
   void interrupt(bool begin) => interruptions
       .add(AudioInterruptionEvent(begin, AudioInterruptionType.pause));

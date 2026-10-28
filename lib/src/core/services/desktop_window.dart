@@ -7,6 +7,10 @@ class DesktopWindow extends ChangeNotifier {
   static final instance = DesktopWindow();
   static const _channel = MethodChannel('ting_reader/window');
   bool get supported =>
+      !kIsWeb &&
+      [TargetPlatform.windows, TargetPlatform.macOS, TargetPlatform.linux]
+          .contains(defaultTargetPlatform);
+  bool get usesCustomTitleBar =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
   bool isMini = false;
   Size normalSize = const Size(1280, 720);

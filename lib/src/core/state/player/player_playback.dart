@@ -24,6 +24,8 @@ extension _PlayerPlayback on PlayerState {
     double? startAt,
   }) async {
     final playGeneration = ++_playGeneration;
+    _selectionPending = false;
+    _resumeIdentity = _currentResumeIdentity;
     _cancelFocusRecovery(clearResume: true);
     // 清除可能残留的抑制标记，确保用户手动切集时正常起播；
     // 睡眠定时的监听器会在 notifyListeners 期间重新设置它。
@@ -60,6 +62,7 @@ extension _PlayerPlayback on PlayerState {
       _suppressAutoPlay = true;
     }
     _notifyIfActive();
+    unawaited(_saveResumeRecord());
     await _waitForPendingTranscodeSeek();
     if (!_isActivePlay(playGeneration, targetChapter.id)) return;
 
@@ -174,6 +177,11 @@ extension _PlayerPlayback on PlayerState {
 
   Future<void> _togglePlayback() async {
     if (!hasChapter) return;
+    if (_selectionPending) {
+      await playChapter(currentBook!, chapters, currentChapter!,
+          startAt: currentTime);
+      return;
+    }
     if (_gatewayReauthenticationPending) {
       _resumeAfterGatewayReauthentication = false;
       if (_audio.playing) await _audio.pause();
@@ -213,6 +221,11 @@ extension _PlayerPlayback on PlayerState {
     currentTime = target;
     _furthestChapterPosition = target;
     _notifyIfActive();
+    if (_selectionPending) {
+      ++_playGeneration;
+      await _saveResumeRecord(includePending: true);
+      return;
+    }
     final chapter = currentChapter;
     if (_usingTranscodeStream && chapter != null) {
       _resetTranscodeClock(target);

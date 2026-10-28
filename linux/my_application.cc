@@ -10,15 +10,90 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  GtkWindow* window;
+  FlMethodChannel* window_channel;
+  gchar* close_behavior;
+  gboolean mini_mode;
+  gint normal_width;
+  gint normal_height;
+  gint normal_x;
+  gint normal_y;
+  gboolean normal_maximized;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
+
+static gboolean handle_window_close(GtkWidget*, GdkEvent*, gpointer data) {
+  MyApplication* self = MY_APPLICATION(data);
+  if (g_strcmp0(self->close_behavior, "exit") == 0) {
+    g_application_quit(G_APPLICATION(self));
+  } else if (g_strcmp0(self->close_behavior, "minimize") == 0) {
+    gtk_window_iconify(self->window);
+  } else {
+    fl_method_channel_invoke_method(self->window_channel, "closeRequested",
+                                   nullptr, nullptr, nullptr, nullptr);
+  }
+  return TRUE;
+}
+
+static void handle_window_method(FlMethodChannel*, FlMethodCall* call,
+                                 gpointer data) {
+  MyApplication* self = MY_APPLICATION(data);
+  const gchar* method = fl_method_call_get_name(call);
+  FlValue* args = fl_method_call_get_args(call);
+  g_autoptr(FlValue) value = nullptr;
+  if (g_strcmp0(method, "setMiniMode") == 0) {
+    const gboolean enabled = args && fl_value_get_type(args) == FL_VALUE_TYPE_BOOL &&
+                             fl_value_get_bool(args);
+    if (enabled && !self->mini_mode) {
+      gtk_window_get_size(self->window, &self->normal_width, &self->normal_height);
+      gtk_window_get_position(self->window, &self->normal_x, &self->normal_y);
+      self->normal_maximized = gtk_window_is_maximized(self->window);
+      gtk_window_unmaximize(self->window);
+      gtk_window_resize(self->window, 560, 174);
+      gtk_window_set_keep_above(self->window, TRUE);
+    } else if (!enabled && self->mini_mode) {
+      gtk_window_set_keep_above(self->window, FALSE);
+      gtk_window_resize(self->window, self->normal_width, self->normal_height);
+      gtk_window_move(self->window, self->normal_x, self->normal_y);
+      if (self->normal_maximized) gtk_window_maximize(self->window);
+    }
+    self->mini_mode = enabled;
+  } else if (g_strcmp0(method, "setCloseBehavior") == 0) {
+    g_free(self->close_behavior);
+    self->close_behavior = g_strdup(args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING
+        ? fl_value_get_string(args) : "ask");
+  } else if (g_strcmp0(method, "minimize") == 0) {
+    gtk_window_iconify(self->window);
+  } else if (g_strcmp0(method, "close") == 0) {
+    gtk_window_close(self->window);
+  } else if (g_strcmp0(method, "exit") == 0) {
+    g_application_quit(G_APPLICATION(self));
+  } else if (g_strcmp0(method, "toggleMaximize") == 0) {
+    const gboolean maximize = !gtk_window_is_maximized(self->window);
+    if (maximize) gtk_window_maximize(self->window);
+    else gtk_window_unmaximize(self->window);
+    value = fl_value_new_bool(maximize);
+  } else if (g_strcmp0(method, "startDragging") == 0) {
+    GdkDisplay* display = gtk_widget_get_display(GTK_WIDGET(self->window));
+    GdkDevice* pointer = gdk_seat_get_pointer(gdk_display_get_default_seat(display));
+    gint x = 0;
+    gint y = 0;
+    gdk_device_get_position(pointer, nullptr, &x, &y);
+    gtk_window_begin_move_drag(self->window, 1, x, y, gtk_get_current_event_time());
+  } else {
+    fl_method_call_respond_not_implemented(call, nullptr);
+    return;
+  }
+  fl_method_call_respond_success(call, value, nullptr);
+}
 
 // Implements GApplication::activate.
 static void my_application_activate(GApplication* application) {
   MyApplication* self = MY_APPLICATION(application);
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
+  self->window = window;
 
   // Use a header bar when running in GNOME as this is the common style used
   // by applications and is the setup most users will be using (e.g. Ubuntu
@@ -59,6 +134,14 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  g_autoptr(FlStandardMethodCodec) codec = fl_standard_method_codec_new();
+  self->window_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "ting_reader/window", FL_METHOD_CODEC(codec));
+  fl_method_channel_set_method_call_handler(self->window_channel,
+                                          handle_window_method, self, nullptr);
+  g_signal_connect(window, "delete-event", G_CALLBACK(handle_window_close), self);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
@@ -85,6 +168,8 @@ static gboolean my_application_local_command_line(GApplication* application, gch
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
+  g_clear_object(&self->window_channel);
+  g_clear_pointer(&self->close_behavior, g_free);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 

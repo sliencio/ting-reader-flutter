@@ -44,14 +44,15 @@ class _DesktopWindowHostState extends State<DesktopWindowHost> {
 
   Widget _buildScene(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
+    final showTitleBar = window.usesCustomTitleBar || window.isMini;
     if (!window.isMini) {
-      window.normalSize =
-          Size(size.width, (size.height - 34).clamp(0, double.infinity));
+      window.normalSize = Size(size.width,
+          (size.height - (showTitleBar ? 34 : 0)).clamp(0, double.infinity));
     }
     return Material(
       color: Theme.of(context).colorScheme.surface,
       child: Column(children: [
-        _WindowTitleBar(openChapters: widget.openChapters),
+        if (showTitleBar) _WindowTitleBar(openChapters: widget.openChapters),
         Expanded(
             child: Stack(fit: StackFit.expand, children: [
           Offstage(
