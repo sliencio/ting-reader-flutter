@@ -102,10 +102,6 @@ class _PluginWebContainerState extends State<_PluginWebContainer> {
     final loadAssetAsTopLevel = _pluginWebViewLoadsAssetAsTopLevel();
     final pluginTheme = _pluginThemePayload(context);
     final themeVariables = pluginTheme['cssVariables'];
-    debugPrint(
-      '[plugin-webview] theme scheme=${pluginTheme['colorScheme']} '
-      'bg=${themeVariables is Map ? themeVariables['--bg'] : ''}',
-    );
     final initPayload = _pluginInitPayloadJson(
       extension: widget.extension,
       extensionContext: widget.extensionContext,
@@ -182,9 +178,6 @@ class _PluginWebContainerState extends State<_PluginWebContainer> {
                       request.url.startsWith('$assetUrl?')) {
                     return NavigationDecision.navigate;
                   }
-                  debugPrint(
-                    '[plugin-webview] blocked untrusted subframe navigation',
-                  );
                   return NavigationDecision.prevent;
                 },
                 onPageFinished: (url) {
@@ -196,13 +189,6 @@ class _PluginWebContainerState extends State<_PluginWebContainer> {
                         pluginId: widget.extension.pluginId,
                         clientGrant: clientGrant,
                       )) {
-                    final parsedUrl = Uri.tryParse(url);
-                    final safeUrl = parsedUrl == null
-                        ? url
-                        : parsedUrl.replace(query: '', fragment: '').toString();
-                    debugPrint(
-                      '[plugin-webview] rejected final document outside plugin asset: $safeUrl',
-                    );
                     if (mounted) {
                       setState(() {
                         _error =
@@ -223,13 +209,7 @@ class _PluginWebContainerState extends State<_PluginWebContainer> {
                       );
                       _appliedThemeSignature =
                           _pluginThemeSignature(pluginTheme);
-                      await _probePluginDocument(
-                        nextController,
-                        url,
-                      );
                     }());
-                  } else {
-                    unawaited(_probePluginDocument(nextController, url));
                   }
                   if (mounted && generation == _loadGeneration) {
                     setState(() => _pageLoaded = true);
@@ -349,11 +329,6 @@ class _PluginWebContainerState extends State<_PluginWebContainer> {
           app: app,
           uri: assetUri,
           kind: _PluginTextAssetKind.document,
-        );
-        final safeUrl = assetUri.replace(query: '', fragment: '').toString();
-        debugPrint(
-          '[plugin-webview] fetched plugin html url=$safeUrl '
-          'length=${html.length}',
         );
         if (_looksLikeTingReaderShell(html)) {
           throw StateError(
@@ -488,8 +463,6 @@ class _PluginWebContainerState extends State<_PluginWebContainer> {
 
   Future<void> _handleBridgeMessage(JavaScriptMessage message) async {
     if (!_acceptBridgeMessage(message.message)) {
-      debugPrint(
-          '[plugin-webview] rejected oversized or rate-limited bridge message');
       return;
     }
 
@@ -510,52 +483,15 @@ class _PluginWebContainerState extends State<_PluginWebContainer> {
     );
     if (request == null) return;
 
-    debugPrint(
-      '[plugin-webview] bridge request method=${request.method}',
-    );
-
     try {
       final result = await _invokeBridgeRequest(request);
       await _postBridgeResponse(request, ok: true, result: result);
-      debugPrint(
-        '[plugin-webview] bridge response method=${request.method} ok=1',
-      );
     } catch (error) {
       await _postBridgeResponse(
         request,
         ok: false,
         error: ApiError.capture(error),
       );
-      debugPrint(
-        '[plugin-webview] bridge response method=${request.method} ok=0',
-      );
-    }
-  }
-
-  Future<void> _probePluginDocument(
-    WebViewController controller,
-    String url,
-  ) async {
-    if (defaultTargetPlatform != TargetPlatform.windows) return;
-    final parsed = Uri.tryParse(url);
-    final safeUrl = parsed == null
-        ? url
-        : parsed.replace(query: '', fragment: '').toString();
-    try {
-      final result = await controller.runJavaScriptReturningResult('''
-JSON.stringify({
-  readyState: document.readyState,
-  title: document.title,
-  href: location.href,
-  bodyLength: document.body ? document.body.innerHTML.length : -1,
-  scriptCount: document.scripts.length,
-  styleCount: document.styleSheets.length,
-  appText: document.body ? document.body.innerText.slice(0, 80) : ""
-})
-''');
-      debugPrint('[plugin-webview] DOM probe url=$safeUrl result=$result');
-    } catch (error) {
-      debugPrint('[plugin-webview] DOM probe failed url=$safeUrl');
     }
   }
 

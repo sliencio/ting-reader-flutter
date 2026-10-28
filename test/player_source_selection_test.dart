@@ -1152,6 +1152,29 @@ void main() {
     });
   }
 
+  test('HTTP 进度同步仅发送续播需要的字段', () async {
+    app
+      ..offlineMode = false
+      ..token = null;
+    final item = chapter('/server/chapter.mp3');
+    player
+      ..currentBook = book
+      ..currentChapter = item
+      ..currentTime = 23.5
+      ..duration = 636;
+
+    await player.sendProgress();
+
+    expect(app.api.progressUpdates, [
+      {
+        'book_id': book.id,
+        'chapter_id': item.id,
+        'position': 23.5,
+        'duration': 636,
+      }
+    ]);
+  });
+
   test('progress synchronization sends one consistent chapter snapshot',
       () async {
     final previousOverrides = HttpOverrides.current;
@@ -1187,7 +1210,7 @@ void main() {
       ..currentChapter = first
       ..currentTime = 12.5
       ..duration = 636;
-    final pending = player.sendProgress(playbackStart: 12.5);
+    final pending = player.sendProgress();
     await received.future.timeout(const Duration(seconds: 3));
     player
       ..currentChapter = second
@@ -1197,7 +1220,7 @@ void main() {
     await pending;
     expect(value['chapter_id'], 'first');
     expect(value['position'], 12);
-    expect(value['playback_start'], 12);
+    expect(value.containsKey('playback_start'), isFalse);
   });
 
   Future<File> localAudioFile() async {

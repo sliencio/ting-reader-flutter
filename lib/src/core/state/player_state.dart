@@ -375,11 +375,9 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     notifyListeners();
   }
 
-  Future<void> sendProgress({double? playbackStart}) async {
+  Future<void> sendProgress() async {
     final local = _saveResumeRecord();
-    final remote = _selectionPending
-        ? Future<void>.value()
-        : _progress.send(playbackStart: playbackStart);
+    final remote = _selectionPending ? Future<void>.value() : _progress.send();
     await Future.wait([local, remote]);
   }
 
@@ -429,7 +427,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
         _audio.processingState == audio.ProcessingState.completed) {
       return;
     }
-    _progress.start(currentTime);
+    _progress.start();
   }
 
   void _stopProgressTimers() => _progress.stop();

@@ -35,12 +35,12 @@ class _PlayerProgress {
 
   bool get _blocked => _disposed || appState.offlineMode || suspended();
 
-  Future<void> send({double? playbackStart}) async {
+  Future<void> send() async {
     if (_blocked) return;
     final value = snapshot();
     if (value == null) return;
-    if (await _sendWebSocket(value, playbackStart: playbackStart)) return;
-    if (!_blocked) await _sendHttp(value, playbackStart: playbackStart);
+    if (await _sendWebSocket(value)) return;
+    if (!_blocked) await _sendHttp(value);
   }
 
   Future<void> _sendCurrentWebSocket() async {
@@ -57,8 +57,7 @@ class _PlayerProgress {
     if (value != null) await _sendHttp(value);
   }
 
-  Future<void> _sendHttp(_ProgressSnapshot value,
-      {double? playbackStart}) async {
+  Future<void> _sendHttp(_ProgressSnapshot value) async {
     if (_blocked) return;
     try {
       await appState.api.post('/api/progress', data: {
@@ -67,15 +66,13 @@ class _PlayerProgress {
         'position': value.position,
         'duration':
             value.duration > 0 ? value.duration : value.chapter.duration,
-        if (playbackStart != null) 'playback_start': playbackStart,
       });
     } catch (_) {
       // Background progress synchronization must not interrupt listening.
     }
   }
 
-  Future<bool> _sendWebSocket(_ProgressSnapshot value,
-      {double? playbackStart}) async {
+  Future<bool> _sendWebSocket(_ProgressSnapshot value) async {
     if (kIsWeb || _blocked || (appState.token?.isEmpty ?? true)) return false;
     try {
       final socket = await _ensureSocket();
@@ -85,7 +82,6 @@ class _PlayerProgress {
         'book_id': value.book.id,
         'chapter_id': value.chapter.id,
         'position': value.position.floor(),
-        if (playbackStart != null) 'playback_start': playbackStart.floor(),
       }));
       return true;
     } catch (error) {
@@ -208,10 +204,10 @@ class _PlayerProgress {
     if (!_disposed) unawaited(appState.handleGatewaySessionExpired());
   }
 
-  void start(double position) {
+  void start() {
     if (_blocked) return;
     stop();
-    unawaited(send(playbackStart: position));
+    unawaited(send());
     _webSocketTimer = Timer.periodic(
         const Duration(seconds: 2), (_) => unawaited(_sendCurrentWebSocket()));
     _httpTimer = Timer.periodic(
