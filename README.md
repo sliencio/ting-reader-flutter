@@ -15,6 +15,8 @@ Ting Reader Flutter 是听悦的跨平台客户端，用于连接 Ting Reader �
 
 ## 本地开发
 
+各平台的本地打包脚本和运行方法见 [打包说明](scripts/README.md)。iOS 在 Mac 上可直接执行 `bash scripts/build_ios.sh`，成品输出到 `dist/`。
+
 ```powershell
 flutter pub get
 flutter analyze
