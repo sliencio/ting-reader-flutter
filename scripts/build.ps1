@@ -48,6 +48,21 @@ if ($Target -eq 'windows' -and !$PortableOnly) {
                 if (Test-Path -LiteralPath $candidate -PathType Leaf) { $iscc = $candidate; break }
             }
         }
+        if (!$iscc) {
+            # 通过安装记录识别使用自定义目录的 Inno Setup。
+            foreach ($registry in @(
+                'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup*_is1',
+                'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup*_is1',
+                'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Inno Setup*_is1'
+            )) {
+                foreach ($entry in @(Get-ItemProperty -Path $registry -ErrorAction SilentlyContinue)) {
+                    if (!$entry.InstallLocation) { continue }
+                    $candidate = Join-Path $entry.InstallLocation 'ISCC.exe'
+                    if (Test-Path -LiteralPath $candidate -PathType Leaf) { $iscc = $candidate; break }
+                }
+                if ($iscc) { break }
+            }
+        }
     }
     if (!$iscc) {
         throw '生成 EXE 安装包需要 Inno Setup 6 或 7；请先安装，或加 -PortableOnly 仅生成便携 ZIP。'
