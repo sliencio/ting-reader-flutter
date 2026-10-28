@@ -93,13 +93,15 @@ Future<void> _select(WidgetTester tester, String label) async {
   final target = find.descendant(
       of: find.byType(ListeningSettingsPage), matching: find.byTooltip(label));
   if (target.evaluate().isEmpty) {
-    await tester.scrollUntilVisible(target, 200,
-        scrollable: find.descendant(
-            of: find.byType(ListeningSettingsPage),
-            matching: find.byType(Scrollable)));
-  } else {
-    await tester.ensureVisible(target);
+    final scrollable = find.descendant(
+        of: find.byType(ListeningSettingsPage),
+        matching: find.byType(Scrollable));
+    tester.state<ScrollableState>(scrollable).position.jumpTo(0);
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(target, 200, scrollable: scrollable);
   }
+  await tester.ensureVisible(target);
+  await tester.pumpAndSettle();
   await tester.tap(target);
   await tester.pumpAndSettle();
 }
@@ -163,6 +165,53 @@ void main() {
         expect(find.byTooltip('Close settings'), findsOneWidget);
       }
       expect(tester.takeException(), isNull);
+    });
+  }
+  for (final size in [
+    const Size(320, 568),
+    const Size(390, 844),
+    const Size(844, 390),
+    const Size(1024, 1366),
+  ]) {
+    testWidgets('iOS 设置在 $size 保持导航并隐藏桌面功能', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final landscape = size.width > size.height;
+      final padding = landscape
+          ? const FakeViewPadding(left: 47, right: 47, bottom: 21)
+          : const FakeViewPadding(top: 59, bottom: 34);
+      tester.view.padding = padding;
+      tester.view.viewPadding = padding;
+      addTearDown(tester.view.resetPadding);
+      addTearDown(tester.view.resetViewPadding);
+      await _pump(tester, size);
+      expect(find.byTooltip('Mini window'), findsNothing);
+      expect(find.byType(NavigationBar), findsNothing);
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      final menu = tester.element(find.byType(ListeningSettingsPage));
+      final bounds = tester.getRect(find.byType(ListeningSettingsPage));
+      expect(find.byTooltip('Window behavior'), findsNothing);
+      expect(find.byTooltip('Exit application'), findsNothing);
+      for (final target in [
+        ('Playback & appearance', PersonalizationPage),
+        ('Favorites', FavoritesPage),
+        ('Downloads', DownloadsPage),
+        ('Bookshelf', BookshelfPage),
+      ]) {
+        await _select(tester, target.$1);
+        expect(find.byType(target.$2), findsOneWidget);
+        expect(tester.getRect(find.byType(ListeningSettingsPage)), bounds);
+        expect(
+            identical(tester.element(find.byType(ListeningSettingsPage)), menu),
+            isTrue);
+        expect(tester.takeException(), isNull, reason: target.$1);
+      }
+      await tester.tap(find.byTooltip('Close settings'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Settings'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
     });
   }
   for (final width in [320.0, 390.0, 1440.0]) {

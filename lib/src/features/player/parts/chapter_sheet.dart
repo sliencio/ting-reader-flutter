@@ -262,11 +262,15 @@ class _ChapterSheetListState extends State<_ChapterSheetList> {
                                   size: 25,
                                 ),
                                 const SizedBox(width: 9),
-                                Text(
-                                  context.localeText('章节列表', 'Chapters'),
-                                  style: const TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w700,
+                                Flexible(
+                                  child: Text(
+                                    context.localeText('章节列表', 'Chapters'),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 20,
+                                      fontWeight: FontWeight.w700,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -281,8 +285,7 @@ class _ChapterSheetListState extends State<_ChapterSheetList> {
                                           : AppColors.slate100,
                                       borderRadius: BorderRadius.circular(14),
                                     ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
+                                    child: Wrap(
                                       children: [
                                         _ChapterTabButton(
                                           label: context.localeText(

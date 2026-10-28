@@ -820,10 +820,14 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  for (final width in [320.0, 390.0, 600.0, 840.0, 1024.0, 1440.0]) {
-    testWidgets('Windows playback bar keeps chapter access at $width',
-        (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+  for (final (platform, width) in [
+    for (final width in [320.0, 390.0, 600.0, 840.0, 1024.0, 1440.0])
+      (TargetPlatform.windows, width),
+    for (final width in [248.0, 320.0, 390.0, 768.0, 1024.0])
+      (TargetPlatform.iOS, width),
+  ]) {
+    testWidgets('播放条在 $platform 宽度 $width 保留章节入口', (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       tester.view.devicePixelRatio = 1;
       tester.view.physicalSize = Size(width, 700);
