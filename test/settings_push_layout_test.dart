@@ -25,6 +25,7 @@ void main() {
       const pageKey = ValueKey('main-page');
       const panelKey = ValueKey('settings-panel');
       var open = false;
+      var clicks = 0;
       late StateSetter update;
       await tester.pumpWidget(MaterialApp(
           theme: ThemeData(platform: platform),
@@ -35,8 +36,12 @@ void main() {
               onClose: () => update(() => open = false),
               panel: const Material(
                   key: panelKey, child: Text('Settings content')),
-              child: const Material(
-                  key: pageKey, child: Text('Bookshelf content')),
+              child: Material(
+                  key: pageKey,
+                  child: Center(
+                      child: TextButton(
+                          onPressed: () => clicks++,
+                          child: const Text('Bookshelf content')))),
             );
           })));
       final before = tester.getRect(find.byKey(pageKey));
@@ -44,8 +49,8 @@ void main() {
       update(() => open = true);
       await tester.pumpAndSettle();
       final after = tester.getRect(find.byKey(pageKey));
-      expect(after.left, closeTo(desktop ? 420 : size.width * 0.88, 0.01));
-      expect(after.width, closeTo(before.width, 0.001));
+      expect(after.left, closeTo(desktop ? 280 : 72, 0.01));
+      expect(after.width, closeTo(before.width - after.left, 0.001));
       expect(after.height, closeTo(before.height, 0.001));
       expect(tester.getTopLeft(find.byKey(panelKey)).dx, 0);
       expect(identical(tester.element(find.byKey(pageKey)), state), isTrue);
@@ -55,7 +60,16 @@ void main() {
           closeTo(before.left, 0.001));
       update(() => open = true);
       await tester.pumpAndSettle();
-      await tester.tapAt(Offset(size.width - 8, size.height / 2));
+      await tester.tap(find.text('Bookshelf content'));
+      await tester.pumpAndSettle();
+      expect(clicks, 1);
+      expect(tester.getRect(find.byKey(pageKey)).left, greaterThan(0));
+      expect(
+          find.descendant(
+              of: find.byType(SettingsPushLayout),
+              matching: find.byType(ModalBarrier)),
+          findsNothing);
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(tester.getRect(find.byKey(pageKey)).left,
           closeTo(before.left, 0.001));

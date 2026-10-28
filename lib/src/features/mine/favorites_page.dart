@@ -24,13 +24,16 @@ class FavoritesPage extends StatefulWidget {
 
 class _FavoritesPageState extends State<FavoritesPage> {
   bool _loading = true;
+  bool _started = false;
   List<Book> _books = [];
   IconSizeSetting _iconSize = IconSizeSetting.medium;
   CoverShape _coverShape = CoverShape.square;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
     _load();
   }
 
@@ -43,6 +46,7 @@ class _FavoritesPageState extends State<FavoritesPage> {
         appState.api.get('/api/settings'),
       ]);
       final settings = asMap(results[1].data);
+      if (!mounted) return;
       setState(() {
         _books = asMapList(results[0].data).map(Book.fromJson).toList();
         _iconSize = iconSizeFromAppSettings(settings);

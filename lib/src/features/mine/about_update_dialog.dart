@@ -40,7 +40,9 @@ class _AboutPageState extends State<AboutPage> {
     _backendVersion = widget.backendVersion;
     _loadClientVersion();
     if ((_backendVersion ?? '').trim().isEmpty) {
-      _loadBackendVersion();
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadBackendVersion();
+      });
     }
   }
 

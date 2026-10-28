@@ -7,6 +7,7 @@ enum AppDestination {
   search,
   favorites,
   mine,
+  windowSettings,
   account,
   history,
   bookmarks,
@@ -121,6 +122,7 @@ class ShellNavigation {
         AppDestination.pluginLogs => AppDestination.plugins,
         AppDestination.search => searchOrigin,
         AppDestination.account ||
+        AppDestination.windowSettings ||
         AppDestination.playlists ||
         AppDestination.favorites ||
         AppDestination.history ||
@@ -147,6 +149,7 @@ class ShellNavigation {
 
 bool isMineDestination(AppDestination destination) => switch (destination) {
       AppDestination.mine ||
+      AppDestination.windowSettings ||
       AppDestination.account ||
       AppDestination.history ||
       AppDestination.bookmarks ||
@@ -162,6 +165,7 @@ bool isMineDestination(AppDestination destination) => switch (destination) {
     };
 
 bool hidesMiniPlayer(AppDestination destination) => switch (destination) {
+      AppDestination.windowSettings ||
       AppDestination.personalization ||
       AppDestination.fnConnect ||
       AppDestination.notifications ||

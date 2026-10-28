@@ -34,6 +34,7 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
   final _widgetCssController = TextEditingController();
 
   bool _loading = true;
+  bool _started = false;
   bool _saving = false;
   bool _saved = false;
   final Map<String, dynamic> _pendingSettingsPatch = {};
@@ -52,8 +53,10 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
   bool _timeZoneSaving = false;
 
   @override
-  void initState() {
-    super.initState();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_started) return;
+    _started = true;
     _load();
   }
 
@@ -67,7 +70,9 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
     final appState = AppScope.appOf(context);
     try {
       await appState.loadSettings(silent: true);
+      if (!mounted) return;
       await appState.loadApplicationTimeZone(silent: true);
+      if (!mounted) return;
       _applySettings(appState.settings);
       _applicationTimeZone = appState.applicationTimeZone;
     } finally {

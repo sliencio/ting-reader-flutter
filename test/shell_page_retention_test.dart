@@ -1,6 +1,11 @@
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:ting_reader_flutter/src/features/mine/listening_settings_page.dart';
+import 'package:ting_reader_flutter/src/features/mine/personalization/personalization_page.dart';
+import 'package:ting_reader_flutter/src/features/mine/favorites_page.dart';
 import 'package:ting_reader_flutter/l10n/app_localizations.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/models/models.dart';
@@ -79,7 +84,79 @@ Future<(_App, _Player)> _pump(WidgetTester tester, Size size) async {
   return (app, player);
 }
 
+Future<void> _select(WidgetTester tester, String label) async {
+  final target = find.descendant(
+      of: find.byType(ListeningSettingsPage), matching: find.byTooltip(label));
+  await tester.ensureVisible(target);
+  await tester.tap(target);
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+  for (final width in [320.0, 390.0, 1440.0]) {
+    testWidgets(
+        'settings selection updates the right pane and preserves navigation at $width',
+        (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      try {
+        final (app, _) = await _pump(tester, Size(width, 1000));
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pumpAndSettle();
+        final menu = tester.element(find.byType(ListeningSettingsPage));
+        final menuBounds = tester.getRect(find.byType(ListeningSettingsPage));
+        expect(
+            find.descendant(
+                of: find.byType(ListeningSettingsPage),
+                matching: find.byTooltip('Mini window')),
+            findsNothing);
+        await _select(tester, 'Window behavior');
+        expect(find.byType(WindowSettingsPage), findsOneWidget);
+        expect(tester.getRect(find.byType(WindowSettingsPage)).left,
+            greaterThan(menuBounds.right - 1));
+        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        expect(
+            identical(tester.element(find.byType(ListeningSettingsPage)), menu),
+            isTrue);
+        expect(
+            find.descendant(
+                of: find.byType(WindowSettingsPage),
+                matching: find.byType(DropdownButtonFormField<String>)),
+            findsNothing);
+        await tester.tap(find.text('Minimize to taskbar'));
+        await tester.pumpAndSettle();
+        expect(app.settings['desktop_close_behavior'], 'minimize');
+        expect(
+            tester
+                .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
+                .groupValue,
+            'minimize');
+        await _select(tester, 'Playback & appearance');
+        expect(find.byType(PersonalizationPage), findsOneWidget);
+        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        await _select(tester, 'Favorites');
+        expect(find.byType(FavoritesPage), findsOneWidget);
+        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        await _select(tester, 'Window behavior');
+        expect(
+            tester
+                .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
+                .groupValue,
+            'minimize');
+        await _select(tester, 'Downloads');
+        expect(find.byType(DownloadsPage), findsOneWidget);
+        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        await tester.tap(find.byTooltip('Back'));
+        await tester.pumpAndSettle();
+        expect(find.byType(BookshelfPage), findsOneWidget);
+        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        expect(find.byTooltip('Close settings'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
   for (final width in [320.0, 390.0, 1440.0]) {
     testWidgets('left gear opens settings while retaining the page at $width',
         (tester) async {
@@ -92,10 +169,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 130));
       final halfway = tester.getRect(find.byType(BookshelfPage));
       expect(halfway.left, greaterThan(before.left));
-      expect(
-          halfway.left, lessThan(before.left + (width * 0.88).clamp(0, 420)));
+      expect(halfway.left, lessThan(before.left + (width >= 840 ? 280 : 72)));
       await tester.pumpAndSettle();
-      expect(find.text('Playback & appearance'), findsOneWidget);
+      expect(find.byTooltip('Playback & appearance'), findsOneWidget);
       await tester.tap(find.byTooltip('Close settings'));
       await tester.pumpAndSettle();
       expect(
@@ -113,13 +189,9 @@ void main() {
     final revision = app.bookDetailsCache.revision;
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Force refresh'));
-    await tester.pumpAndSettle();
+    await _select(tester, 'Force refresh');
     expect(app.bookDetailsCache.revision, revision + 1);
-    await tester.tap(find.byTooltip('Settings'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Bookshelf').last);
-    await tester.pumpAndSettle();
+    await _select(tester, 'Bookshelf');
     expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isFalse);
     expect(tester.takeException(), isNull);
   });
@@ -137,31 +209,19 @@ void main() {
 
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      expect(find.text('Playback & appearance'), findsOneWidget);
+      expect(find.byTooltip('Playback & appearance'), findsOneWidget);
       expect(find.byType(DownloadsPage, skipOffstage: false), findsNothing);
       player.notifyListeners();
       await tester.pump();
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Bookshelf').last);
-      await tester.pumpAndSettle();
+      await _select(tester, 'Bookshelf');
       expect(
           identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
       expect(app.client.requests, requests);
 
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Downloads').last);
-      await tester.pumpAndSettle();
+      await _select(tester, 'Downloads');
       final downloads = tester.state(find.byType(DownloadsPage));
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Bookshelf').last);
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Settings'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Downloads').last);
-      await tester.pumpAndSettle();
+      await _select(tester, 'Bookshelf');
+      await _select(tester, 'Downloads');
       expect(identical(tester.state(find.byType(DownloadsPage)), downloads),
           isTrue);
       expect(app.client.requests, requests);

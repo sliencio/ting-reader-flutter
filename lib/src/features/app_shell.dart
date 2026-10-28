@@ -240,7 +240,6 @@ class _AppShellState extends State<AppShell> {
   void _navigate(VoidCallback change) {
     setState(() {
       _mobileAdminDrawerOpen = false;
-      _settingsOpen = false;
       change();
     });
     if (hidesMiniPlayer(_navigation.navDestination)) {
@@ -280,20 +279,16 @@ class _AppShellState extends State<AppShell> {
       ..clear()
       ..clearLiveImages();
     setState(_primaryPages.clear);
-    (_settingsOpen
-            ? _settingsMessengerKey.currentState
-            : ScaffoldMessenger.of(context))
-        ?.showSnackBar(SnackBar(
-            behavior: SnackBarBehavior.floating,
-            margin: EdgeInsets.fromLTRB(
-                16, 0, 16, AppScope.playerOf(context).hasChapter ? 180 : 84),
-            content: Text(context.localeText('缓存已清除，下次打开将从服务端重新加载',
-                'Cache cleared. Pages will reload from the server.'))));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.fromLTRB(
+            16, 0, 16, AppScope.playerOf(context).hasChapter ? 180 : 84),
+        content: Text(context.localeText('缓存已清除，下次打开将从服务端重新加载',
+            'Cache cleared. Pages will reload from the server.'))));
   }
 
   void _openMobileAdminDrawer() {
     setState(() {
-      _settingsOpen = false;
       _mobileAdminDrawerOpen = true;
     });
   }
@@ -393,11 +388,13 @@ class _AppShellState extends State<AppShell> {
                             bottom: false,
                             child: Column(children: [
                               Row(children: [
-                                IconButton(
-                                  tooltip: context.localeText('设置', 'Settings'),
-                                  icon: const Icon(Icons.settings_outlined),
-                                  onPressed: _openSettings,
-                                ),
+                                if (!_settingsOpen)
+                                  IconButton(
+                                    tooltip:
+                                        context.localeText('设置', 'Settings'),
+                                    icon: const Icon(Icons.settings_outlined),
+                                    onPressed: _openSettings,
+                                  ),
                                 if (!appState.offlineMode &&
                                     !_navigation.hasDetail &&
                                     _primaryDestinations
@@ -406,11 +403,9 @@ class _AppShellState extends State<AppShell> {
                                   IconButton(
                                     tooltip: context.localeText('返回', 'Back'),
                                     icon: const Icon(Icons.arrow_back_rounded),
-                                    onPressed: () {
-                                      if (!_handleSystemBack()) {
-                                        _go(AppDestination.bookshelf);
-                                      }
-                                    },
+                                    onPressed: () => _go(
+                                        _navigation.backDestination ??
+                                            AppDestination.bookshelf),
                                   ),
                                 const Spacer(),
                                 if (DesktopWindow.instance.supported &&
@@ -508,73 +503,89 @@ class _AppShellState extends State<AppShell> {
   }
 
   Widget _settingsPanel() {
-    final app = AppScope.appOf(context);
-    final navigation = Card(
-      elevation: 0,
-      margin: const EdgeInsets.only(bottom: 20),
-      child: Column(children: [
-        for (final entry in _navigationEntries(context))
-          if (entry.destination != AppDestination.mine &&
-              (!app.offlineMode ||
-                  entry.destination == AppDestination.downloads))
-            ListTile(
-              leading: Icon(entry.icon),
-              title: Text(entry.label),
-              selected: app.offlineMode
-                  ? entry.destination == AppDestination.downloads
-                  : entry.destination == _navigation.navDestination,
-              onTap: () => _go(entry.destination),
-            ),
-      ]),
-    );
-    return ScaffoldMessenger(
-      key: _settingsMessengerKey,
-      child: Scaffold(
-        body: SafeArea(
-          child: Column(children: [
-            Padding(
-              padding: const EdgeInsets.only(left: 20, right: 8),
-              child: Row(children: [
-                Expanded(
-                    child: Text(context.localeText('设置', 'Settings'),
-                        style: Theme.of(context).textTheme.titleLarge)),
-                IconButton(
-                  tooltip: context.localeText('关闭设置', 'Close settings'),
-                  icon: const Icon(Icons.chevron_left_rounded),
-                  onPressed: _closeSettings,
-                ),
-              ]),
-            ),
-            Expanded(
-              child: app.offlineMode
-                  ? PageListView(children: [
-                      navigation,
-                      ListTile(
-                        leading: const Icon(Icons.login_rounded),
-                        title: Text(context.l10n.navReturnLogin),
-                        onTap: app.logout,
+    return LayoutBuilder(builder: (context, constraints) {
+      final compact = constraints.maxWidth < 200;
+      final app = AppScope.appOf(context);
+      final navigation = Card(
+        elevation: 0,
+        margin: const EdgeInsets.only(bottom: 20),
+        child: Column(children: [
+          for (final entry in _navigationEntries(context))
+            if (entry.destination != AppDestination.mine &&
+                (!app.offlineMode ||
+                    entry.destination == AppDestination.downloads))
+              Tooltip(
+                  message: entry.label,
+                  child: compact
+                      ? Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: IconButton(
+                            icon: Icon(entry.icon),
+                            style: IconButton.styleFrom(
+                              backgroundColor: entry.destination ==
+                                      _navigation.navDestination
+                                  ? Theme.of(context)
+                                      .colorScheme
+                                      .secondaryContainer
+                                  : Colors.transparent,
+                            ),
+                            isSelected:
+                                entry.destination == _navigation.navDestination,
+                            onPressed: () => _go(entry.destination),
+                          ))
+                      : ListTile(
+                          leading: Icon(entry.icon),
+                          title: Text(entry.label),
+                          selected: app.offlineMode
+                              ? entry.destination == AppDestination.downloads
+                              : entry.destination == _navigation.navDestination,
+                          onTap: () => _go(entry.destination),
+                        )),
+        ]),
+      );
+      return ScaffoldMessenger(
+        key: _settingsMessengerKey,
+        child: Scaffold(
+          body: SafeArea(
+            child: Column(children: [
+              Padding(
+                padding: EdgeInsets.only(
+                    left: compact ? 0 : 20, right: compact ? 0 : 8),
+                child: Row(
+                    mainAxisAlignment: compact
+                        ? MainAxisAlignment.center
+                        : MainAxisAlignment.start,
+                    children: [
+                      if (!compact)
+                        Expanded(
+                            child: Text(context.localeText('设置', 'Settings'),
+                                style: Theme.of(context).textTheme.titleLarge)),
+                      IconButton(
+                        tooltip: context.localeText('关闭设置', 'Close settings'),
+                        icon: const Icon(Icons.chevron_left_rounded),
+                        onPressed: _closeSettings,
                       ),
-                      if (DesktopWindow.instance.supported)
-                        ListTile(
-                          leading: const Icon(Icons.power_settings_new_rounded),
-                          title: Text(
-                              context.localeText('退出软件', 'Exit application')),
-                          onTap: DesktopWindow.instance.requestExit,
-                        ),
-                    ])
-                  : ListeningSettingsPage(
-                      embedded: true,
-                      navigation: navigation,
-                      forceRefresh: _forceRefresh,
-                      go: _go,
-                      openManagement: _openMobileAdminDrawer,
-                      hasPluginPages: _sidebarPluginPages.isNotEmpty,
-                    ),
-            ),
-          ]),
+                    ]),
+              ),
+              Expanded(
+                child: ListeningSettingsPage(
+                  embedded: true,
+                  compact: compact,
+                  currentDestination: _navigation.navDestination,
+                  showMessage: (message) => ScaffoldMessenger.of(context)
+                      .showSnackBar(SnackBar(content: Text(message))),
+                  navigation: navigation,
+                  forceRefresh: _forceRefresh,
+                  go: _go,
+                  openManagement: _openMobileAdminDrawer,
+                  hasPluginPages: _sidebarPluginPages.isNotEmpty,
+                ),
+              ),
+            ]),
+          ),
         ),
-      ),
-    );
+      );
+    });
   }
 
   Widget _buildPage() {
@@ -641,6 +652,8 @@ class _AppShellState extends State<AppShell> {
           openManagement: _openMobileAdminDrawer,
           hasPluginPages: _sidebarPluginPages.isNotEmpty,
         );
+      case AppDestination.windowSettings:
+        return const WindowSettingsPage();
       case AppDestination.account:
         return MyPage(
           onBack: () => _go(AppDestination.mine),
