@@ -8,6 +8,12 @@ import '../../shared/plugin_extensions/plugin_extension_host.dart';
 import '../../core/utils/locale.dart';
 import '../../shared/app_scope.dart';
 import '../../shared/common/common_widgets.dart';
+import '../player/desktop_window_host.dart';
+
+const _windowBehaviorIcon = SizedBox.square(
+  dimension: 24,
+  child: FittedBox(child: WindowCaptionIcon(WindowCaptionAction.mini)),
+);
 
 class ListeningSettingsPage extends StatefulWidget {
   const ListeningSettingsPage({
@@ -118,10 +124,13 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
         if (widget.navigation != null) widget.navigation!,
         if (DesktopWindow.instance.supported)
           group([
-            entry(
-                Icons.desktop_windows_outlined,
+            action(
+                Icons.picture_in_picture_alt_rounded,
                 context.localeText('窗口行为', 'Window behavior'),
-                AppDestination.windowSettings)
+                () => widget.go(AppDestination.windowSettings),
+                selected:
+                    widget.currentDestination == AppDestination.windowSettings,
+                leadingIcon: _windowBehaviorIcon)
           ]),
         if (!app.offlineMode) ...[
           group([
@@ -251,7 +260,7 @@ class _WindowSettingsPageState extends State<WindowSettingsPage> {
         constraints: const BoxConstraints(maxWidth: 840),
         child: PageListView(children: [
           HeaderText(
-              icon: Icons.desktop_windows_outlined,
+              iconWidget: _windowBehaviorIcon,
               title: context.localeText('窗口行为', 'Window behavior'),
               subtitle:
                   context.localeText('点击关闭按钮时', 'When closing the window')),

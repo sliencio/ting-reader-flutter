@@ -8,6 +8,7 @@ import 'package:ting_reader_flutter/src/features/mine/personalization/personaliz
 import 'package:ting_reader_flutter/src/features/mine/favorites_page.dart';
 import 'package:ting_reader_flutter/src/features/admin/admin_pages.dart';
 import 'package:ting_reader_flutter/src/features/admin/users/admin_users_page.dart';
+import 'package:ting_reader_flutter/src/features/player/desktop_window_host.dart';
 import 'package:ting_reader_flutter/l10n/app_localizations.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/models/models.dart';
@@ -105,6 +106,41 @@ Future<void> _select(WidgetTester tester, String label) async {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  for (final platform in [
+    TargetPlatform.android,
+    TargetPlatform.iOS,
+    TargetPlatform.windows,
+    TargetPlatform.macOS,
+    TargetPlatform.linux
+  ]) {
+    testWidgets('window settings entry visibility on $platform',
+        (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
+      try {
+        await _pump(tester, const Size(390, 1000));
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pumpAndSettle();
+        final desktop = [
+          TargetPlatform.windows,
+          TargetPlatform.macOS,
+          TargetPlatform.linux
+        ].contains(platform);
+        final entry = find.descendant(
+            of: find.byType(ListeningSettingsPage),
+            matching: find.byTooltip('Window behavior'));
+        expect(entry, desktop ? findsOneWidget : findsNothing);
+        if (desktop) {
+          final icon = find.descendant(
+              of: entry, matching: find.byType(WindowCaptionIcon));
+          expect(tester.widget<WindowCaptionIcon>(icon).action,
+              WindowCaptionAction.mini);
+        }
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
   for (final width in [390.0, 1440.0]) {
     testWidgets('admin entries open directly from settings at $width',
         (tester) async {
@@ -150,7 +186,7 @@ void main() {
         expect(
             find.descendant(
                 of: find.byType(WindowSettingsPage),
-                matching: find.byIcon(Icons.desktop_windows_outlined)),
+                matching: find.byType(WindowCaptionIcon)),
             findsOneWidget);
         expect(tester.getRect(find.byType(WindowSettingsPage)).left,
             greaterThan(menuBounds.right - 1));
