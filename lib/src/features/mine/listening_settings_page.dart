@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/services/desktop_window.dart';
 import '../../core/state/navigation_state.dart';
+import '../../core/plugin_extensions/types.dart';
+import '../../shared/plugin_extensions/plugin_extension_host.dart';
 import '../../core/utils/locale.dart';
 import '../../shared/app_scope.dart';
 import '../../shared/common/common_widgets.dart';
@@ -11,8 +13,9 @@ class ListeningSettingsPage extends StatefulWidget {
   const ListeningSettingsPage({
     super.key,
     required this.go,
-    required this.openManagement,
-    required this.hasPluginPages,
+    this.pluginPages = const [],
+    this.onOpenPluginPage,
+    this.activePluginPageId,
     required this.forceRefresh,
     this.embedded = false,
     this.navigation,
@@ -22,8 +25,9 @@ class ListeningSettingsPage extends StatefulWidget {
   });
 
   final ValueChanged<AppDestination> go;
-  final VoidCallback openManagement;
-  final bool hasPluginPages;
+  final List<ClientExtensionDescriptor> pluginPages;
+  final ValueChanged<ClientExtensionDescriptor>? onOpenPluginPage;
+  final String? activePluginPageId;
   final Future<void> Function() forceRefresh;
   final bool embedded;
   final Widget? navigation;
@@ -62,11 +66,11 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
   Widget build(BuildContext context) {
     final app = AppScope.appOf(context);
     Widget action(IconData icon, String title, VoidCallback? onTap,
-        {bool selected = false}) {
+        {bool selected = false, Widget? leadingIcon}) {
       final leading = _refreshing && icon == Icons.sync_rounded
           ? const SizedBox.square(
               dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-          : Icon(icon);
+          : leadingIcon ?? Icon(icon, size: 24);
       return Tooltip(
         message: title,
         child: widget.compact
@@ -115,7 +119,7 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
         if (DesktopWindow.instance.supported)
           group([
             entry(
-                Icons.window_rounded,
+                Icons.desktop_windows_outlined,
                 context.localeText('窗口行为', 'Window behavior'),
                 AppDestination.windowSettings)
           ]),
@@ -150,13 +154,17 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                 context.localeText('书单', 'Playlists'),
                 AppDestination.playlists),
           ]),
-          if (app.isAdmin || widget.hasPluginPages)
+          if (app.isAdmin || widget.pluginPages.isNotEmpty)
             group([
-              action(
-                  Icons.dns_outlined,
-                  context.localeText('服务端管理与扩展', 'Server & extensions'),
-                  widget.openManagement),
               if (app.isAdmin) ...[
+                entry(Icons.storage_rounded, context.l10n.navLibraries,
+                    AppDestination.libraries),
+                entry(Icons.extension_rounded, context.l10n.navPlugins,
+                    AppDestination.plugins),
+                entry(Icons.terminal_rounded, context.l10n.navLogs,
+                    AppDestination.logs),
+                entry(Icons.group_rounded, context.l10n.navUsers,
+                    AppDestination.users),
                 entry(
                     Icons.notifications_none_rounded,
                     context.localeText('通知', 'Notifications'),
@@ -166,6 +174,16 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                     context.localeText('收听统计', 'Listening statistics'),
                     AppDestination.statistics),
               ],
+              for (final extension in widget.pluginPages)
+                action(
+                    Icons.extension_rounded,
+                    extension.label,
+                    widget.onOpenPluginPage == null
+                        ? null
+                        : () => widget.onOpenPluginPage!(extension),
+                    selected: widget.activePluginPageId == extension.id,
+                    leadingIcon:
+                        PluginExtensionIcon(extension: extension, size: 24)),
             ]),
           group([
             action(
@@ -232,11 +250,11 @@ class _WindowSettingsPageState extends State<WindowSettingsPage> {
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 840),
         child: PageListView(children: [
-          Text(context.localeText('窗口行为', 'Window behavior'),
-              style: Theme.of(context).textTheme.headlineSmall),
-          const SizedBox(height: 24),
-          Text(context.localeText('点击关闭按钮时', 'When closing the window'),
-              style: Theme.of(context).textTheme.titleMedium),
+          HeaderText(
+              icon: Icons.desktop_windows_outlined,
+              title: context.localeText('窗口行为', 'Window behavior'),
+              subtitle:
+                  context.localeText('点击关闭按钮时', 'When closing the window')),
           const SizedBox(height: 12),
           Card(
             margin: EdgeInsets.zero,

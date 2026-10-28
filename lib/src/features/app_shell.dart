@@ -1,5 +1,3 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -24,7 +22,6 @@ import '../core/models/models.dart';
 import '../core/services/desktop_window.dart';
 import '../core/state/navigation_state.dart';
 import '../core/plugin_extensions/types.dart';
-import '../core/theme/app_theme.dart';
 import '../core/utils/locale.dart';
 import '../shared/app_scope.dart';
 import '../shared/common/common_widgets.dart';
@@ -32,75 +29,32 @@ import '../shared/plugin_extensions/plugin_extension_host.dart';
 import 'player/mini_player.dart';
 import 'settings_push_layout.dart';
 
-part 'shell_mobile_navigation.dart';
-
 typedef _NavigationEntry = ({
   AppDestination destination,
   IconData icon,
   String label,
 });
 
-List<_NavigationEntry> _navigationEntries(
-  BuildContext context, {
-  bool admin = false,
-}) {
+List<_NavigationEntry> _navigationEntries(BuildContext context) {
   final l10n = context.l10n;
-  return admin
-      ? [
-          (
-            destination: AppDestination.libraries,
-            icon: Icons.storage_rounded,
-            label: l10n.navLibraries,
-          ),
-          (
-            destination: AppDestination.plugins,
-            icon: Icons.extension_rounded,
-            label: l10n.navPlugins,
-          ),
-          (
-            destination: AppDestination.logs,
-            icon: Icons.terminal_rounded,
-            label: l10n.navLogs,
-          ),
-          (
-            destination: AppDestination.users,
-            icon: Icons.group_rounded,
-            label: l10n.navUsers,
-          ),
-        ]
-      : [
-          (
-            destination: AppDestination.bookshelf,
-            icon: Icons.library_books_rounded,
-            label: l10n.navBookshelf,
-          ),
-          (
-            destination: AppDestination.downloads,
-            icon: Icons.download_outlined,
-            label: l10n.navDownloads,
-          ),
-          (
-            destination: AppDestination.mine,
-            icon: Icons.settings_outlined,
-            label: context.localeText('设置', 'Settings'),
-          ),
-        ];
+  return [
+    (
+      destination: AppDestination.bookshelf,
+      icon: Icons.library_books_rounded,
+      label: l10n.navBookshelf,
+    ),
+    (
+      destination: AppDestination.downloads,
+      icon: Icons.download_outlined,
+      label: l10n.navDownloads,
+    ),
+    (
+      destination: AppDestination.mine,
+      icon: Icons.settings_outlined,
+      label: context.localeText('设置', 'Settings'),
+    ),
+  ];
 }
-
-bool _navigationSelected(AppDestination target, AppDestination current) =>
-    target == AppDestination.mine
-        ? current != AppDestination.downloads &&
-            (isMineDestination(current) ||
-                current == AppDestination.playlists ||
-                current == AppDestination.libraries ||
-                current == AppDestination.plugins ||
-                current == AppDestination.logs ||
-                current == AppDestination.users ||
-                current == AppDestination.pluginPage ||
-                current == AppDestination.pluginLogs)
-        : target == AppDestination.bookshelf
-            ? current == target || current == AppDestination.search
-            : current == target;
 
 class AppShell extends StatefulWidget {
   const AppShell({super.key});
@@ -127,7 +81,6 @@ class _AppShellState extends State<AppShell> {
   ClientExtensionDescriptor? get _activePluginPage =>
       _navigation.activePluginPage;
   PluginItem? get _activePluginLogs => _navigation.activePluginLogs;
-  bool _mobileAdminDrawerOpen = false;
   bool _settingsOpen = false;
   bool _settingsCreated = false;
   final _settingsMessengerKey = GlobalKey<ScaffoldMessengerState>();
@@ -239,7 +192,6 @@ class _AppShellState extends State<AppShell> {
 
   void _navigate(VoidCallback change) {
     setState(() {
-      _mobileAdminDrawerOpen = false;
       change();
     });
     if (hidesMiniPlayer(_navigation.navDestination)) {
@@ -287,18 +239,6 @@ class _AppShellState extends State<AppShell> {
             'Cache cleared. Pages will reload from the server.'))));
   }
 
-  void _openMobileAdminDrawer() {
-    setState(() {
-      _mobileAdminDrawerOpen = true;
-    });
-  }
-
-  void _closeMobileAdminDrawer() {
-    if (_mobileAdminDrawerOpen) {
-      setState(() => _mobileAdminDrawerOpen = false);
-    }
-  }
-
   void _openBook(String id) => _openBookAtChapter(id, null);
   void _openBookAtChapter(String id, String? chapterId) => _navigate(
         () => _navigation.openDetail(DetailDestination.book, id,
@@ -320,10 +260,6 @@ class _AppShellState extends State<AppShell> {
     final player = AppScope.playerOf(context);
     if (player.isExpanded) {
       player.setExpanded(false);
-      return true;
-    }
-    if (_mobileAdminDrawerOpen) {
-      _closeMobileAdminDrawer();
       return true;
     }
     if (_navigation.hasDetail) {
@@ -431,23 +367,12 @@ class _AppShellState extends State<AppShell> {
                             bottom: bottomInset + (collapsedMini ? 20 : 12),
                             child: const MiniPlayer(),
                           ),
-                        if (!player.isExpanded && !_mobileAdminDrawerOpen)
+                        if (!player.isExpanded)
                           Positioned.fill(
                             child: PluginExtensionHost(
                               bottomOffset: pluginExtensionBottom,
                               enabled: appState.pluginToolMenuEnabled &&
                                   _destination == AppDestination.plugins,
-                            ),
-                          ),
-                        if (_mobileAdminDrawerOpen)
-                          Positioned.fill(
-                            child: _MobileAdminOverlay(
-                              go: _go,
-                              current: navDestination,
-                              onClose: _closeMobileAdminDrawer,
-                              pluginPages: _sidebarPluginPages,
-                              activePluginPageId: _activePluginPage?.id,
-                              onOpenPluginPage: _openPluginPage,
                             ),
                           ),
                         if (player.isExpanded)
@@ -577,8 +502,9 @@ class _AppShellState extends State<AppShell> {
                   navigation: navigation,
                   forceRefresh: _forceRefresh,
                   go: _go,
-                  openManagement: _openMobileAdminDrawer,
-                  hasPluginPages: _sidebarPluginPages.isNotEmpty,
+                  onOpenPluginPage: _openPluginPage,
+                  pluginPages: _sidebarPluginPages,
+                  activePluginPageId: _activePluginPage?.id,
                 ),
               ),
             ]),
@@ -649,8 +575,9 @@ class _AppShellState extends State<AppShell> {
         return ListeningSettingsPage(
           forceRefresh: _forceRefresh,
           go: _go,
-          openManagement: _openMobileAdminDrawer,
-          hasPluginPages: _sidebarPluginPages.isNotEmpty,
+          onOpenPluginPage: _openPluginPage,
+          pluginPages: _sidebarPluginPages,
+          activePluginPageId: _activePluginPage?.id,
         );
       case AppDestination.windowSettings:
         return const WindowSettingsPage();
@@ -739,23 +666,6 @@ class _AppShellState extends State<AppShell> {
           },
         );
     }
-  }
-}
-
-class _GroupLabel extends StatelessWidget {
-  const _GroupLabel(this.text);
-
-  final String text;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-      child: Text(
-        text,
-        style: const TextStyle(color: AppColors.slate400, fontSize: 12),
-      ),
-    );
   }
 }
 

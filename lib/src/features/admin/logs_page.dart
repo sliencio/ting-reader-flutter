@@ -463,13 +463,15 @@ class _LogsTitle extends StatelessWidget {
               size: 30,
             ),
             const SizedBox(width: 12),
-            Text(
+            Flexible(
+                child: Text(
               context.localeText('系统日志', 'System Logs'),
+              textAlign: compact ? TextAlign.center : TextAlign.start,
               style: TextStyle(
                 fontSize: compact ? 24 : 30,
                 height: 1.15,
               ),
-            ),
+            )),
           ],
         ),
         const SizedBox(height: 6),

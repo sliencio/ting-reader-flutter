@@ -6,6 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ting_reader_flutter/src/features/mine/listening_settings_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/personalization/personalization_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/favorites_page.dart';
+import 'package:ting_reader_flutter/src/features/admin/admin_pages.dart';
+import 'package:ting_reader_flutter/src/features/admin/users/admin_users_page.dart';
 import 'package:ting_reader_flutter/l10n/app_localizations.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/models/models.dart';
@@ -56,14 +58,16 @@ class _Player extends ChangeNotifier implements PlayerState {
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
-Future<(_App, _Player)> _pump(WidgetTester tester, Size size) async {
+Future<(_App, _Player)> _pump(WidgetTester tester, Size size,
+    {bool admin = false}) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
   final app = _App()
     ..token = 'token'
-    ..user = const User(id: 'user', username: 'reader', role: 'user');
+    ..user =
+        User(id: 'user', username: 'reader', role: admin ? 'admin' : 'user');
   final player = _Player();
   final downloads = DownloadState(app);
   addTearDown(app.dispose);
@@ -87,13 +91,44 @@ Future<(_App, _Player)> _pump(WidgetTester tester, Size size) async {
 Future<void> _select(WidgetTester tester, String label) async {
   final target = find.descendant(
       of: find.byType(ListeningSettingsPage), matching: find.byTooltip(label));
-  await tester.ensureVisible(target);
+  if (target.evaluate().isEmpty) {
+    await tester.scrollUntilVisible(target, 200,
+        scrollable: find.descendant(
+            of: find.byType(ListeningSettingsPage),
+            matching: find.byType(Scrollable)));
+  } else {
+    await tester.ensureVisible(target);
+  }
   await tester.tap(target);
   await tester.pumpAndSettle();
 }
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  for (final width in [390.0, 1440.0]) {
+    testWidgets('admin entries open directly from settings at $width',
+        (tester) async {
+      await _pump(tester, Size(width, 1000), admin: true);
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      final bounds = tester.getRect(find.byType(ListeningSettingsPage));
+      expect(find.byTooltip('Server & extensions'), findsNothing);
+      for (final target in [
+        ('Libraries', AdminLibrariesPage),
+        ('Users', AdminUsersV2Page),
+        ('Plugins', PluginsPage),
+        ('System Logs', LogsPage),
+      ]) {
+        await _select(tester, target.$1);
+        expect(tester.takeException(), isNull, reason: target.$1);
+        expect(find.byType(target.$2), findsOneWidget);
+        expect(find.byType(Drawer), findsNothing);
+        expect(tester.getRect(find.byType(ListeningSettingsPage)), bounds);
+        expect(find.byTooltip('Close settings'), findsOneWidget);
+      }
+      expect(tester.takeException(), isNull);
+    });
+  }
   for (final width in [320.0, 390.0, 1440.0]) {
     testWidgets(
         'settings selection updates the right pane and preserves navigation at $width',
@@ -112,6 +147,11 @@ void main() {
             findsNothing);
         await _select(tester, 'Window behavior');
         expect(find.byType(WindowSettingsPage), findsOneWidget);
+        expect(
+            find.descendant(
+                of: find.byType(WindowSettingsPage),
+                matching: find.byIcon(Icons.desktop_windows_outlined)),
+            findsOneWidget);
         expect(tester.getRect(find.byType(WindowSettingsPage)).left,
             greaterThan(menuBounds.right - 1));
         expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
