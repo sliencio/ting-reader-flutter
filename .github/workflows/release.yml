@@ -220,9 +220,9 @@ jobs:
   macos:
     name: macOS
     needs: [dependencies, quality]
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: 检查 Apple 编译工具链
@@ -256,9 +256,9 @@ jobs:
   ios:
     name: iOS self-sign IPA
     needs: [dependencies, quality]
-    runs-on: macos-15
+    runs-on: macos-26
     env:
-      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
       - name: 检查 Apple 编译工具链
