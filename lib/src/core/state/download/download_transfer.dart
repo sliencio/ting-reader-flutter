@@ -198,6 +198,7 @@ class DownloadTransfer {
         bookMetadata: task.bookMetadata,
         serverKey: task.serverKey,
         serverName: task.serverName,
+        automatic: task.automatic,
       );
       promotedFile = null;
       return item;

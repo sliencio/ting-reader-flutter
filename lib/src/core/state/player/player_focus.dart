@@ -263,6 +263,8 @@ extension _PlayerAudioFocus on PlayerState {
     if (_disposed || stillAllowed?.call() == false) return false;
     if (!await _activateAudioSessionForPlayback()) return false;
     if (_disposed || stillAllowed?.call() == false) return false;
+    await _prepareSmartResume();
+    if (_disposed || stillAllowed?.call() == false) return false;
     final playGeneration = _playGeneration;
     final playback = _audio.play();
     if (waitForCompletion) {

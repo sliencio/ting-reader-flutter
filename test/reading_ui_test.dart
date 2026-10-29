@@ -10,6 +10,7 @@ import 'package:ting_reader_flutter/src/core/models/models.dart';
 import 'package:ting_reader_flutter/src/core/state/app_state.dart';
 import 'package:ting_reader_flutter/src/core/state/download_state.dart';
 import 'package:ting_reader_flutter/src/core/state/player_state.dart';
+import 'package:ting_reader_flutter/src/features/mine/downloads_page.dart';
 import 'package:ting_reader_flutter/src/core/state/player/playback_sleep.dart';
 import 'package:ting_reader_flutter/src/core/state/navigation_state.dart';
 import 'package:ting_reader_flutter/src/features/bookshelf/bookshelf_page.dart';
@@ -331,6 +332,10 @@ class _PromptApp extends _ReadingApp {
 }
 
 class _ReadingPlayer extends ChangeNotifier implements PlayerState {
+  @override
+  bool isLoading = false;
+  @override
+  String? playbackStatus;
   double? bookmarkPosition;
   int playCalls = 0;
   int seekCalls = 0;
@@ -413,6 +418,32 @@ Future<void> _pump(
 }
 
 void main() {
+  for (final width in [320.0, 1024.0]) {
+    testWidgets('下载设置在宽度 $width 可滚动配置智能缓存且可关闭', (tester) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = Size(width, 640);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final app = _ReadingApp();
+      final player = _ReadingPlayer();
+      addTearDown(app.dispose);
+      addTearDown(player.dispose);
+      await _pump(tester, app, player, const DownloadsPage());
+      await tester.tap(find.widgetWithText(OutlinedButton, 'Settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Smart downloads'), findsOneWidget);
+      await tester.tap(find.widgetWithText(SwitchListTile, 'Smart downloads'));
+      await tester.pumpAndSettle();
+      expect(find.text('Upcoming chapters to cache'), findsOneWidget);
+      expect(find.text('Automatic cache size limit'), findsOneWidget);
+      final cancel = find.widgetWithText(TextButton, 'Cancel');
+      expect(tester.getBottomRight(cancel).dy, lessThanOrEqualTo(640));
+      expect(tester.takeException(), isNull);
+      await tester.tap(cancel);
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+    });
+  }
   testWidgets(
       'creating a user initializes an empty form without an existing user',
       (tester) async {

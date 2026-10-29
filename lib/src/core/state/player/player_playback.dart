@@ -25,6 +25,7 @@ extension _PlayerPlayback on PlayerState {
     bool autoPlay = true,
   }) async {
     final playGeneration = ++_playGeneration;
+    _connectingPlayback = true;
     _selectionPending = false;
     _resumeIdentity = _currentResumeIdentity;
     _cancelFocusRecovery(clearResume: true);
@@ -34,6 +35,8 @@ extension _PlayerPlayback on PlayerState {
     await applySettings(appState.settings);
     if (_disposed || playGeneration != _playGeneration) return;
     book = await _withLocalSkipSettings(book);
+    if (_disposed || playGeneration != _playGeneration) return;
+    if (currentBook?.id != book.id) await _applyBookSpeed(book);
     if (_disposed || playGeneration != _playGeneration) return;
     var nextChapters = sortChaptersForPlayback(chapterList);
     if (nextChapters.every((item) => item.id != chapter.id)) {
@@ -66,6 +69,7 @@ extension _PlayerPlayback on PlayerState {
       _suppressAutoPlay = true;
     }
     _notifyIfActive();
+    _updateListeningCache();
     unawaited(_saveResumeRecord());
     await _waitForPendingTranscodeSeek();
     if (!_isActivePlay(playGeneration, targetChapter.id)) return;
@@ -178,11 +182,21 @@ extension _PlayerPlayback on PlayerState {
         );
         _notifyIfActive();
       }
+    } finally {
+      if (_isActivePlay(playGeneration, targetChapter.id)) {
+        _connectingPlayback = false;
+        _notifyIfActive();
+      }
     }
   }
 
   Future<void> _togglePlayback() async {
     if (!hasChapter) return;
+    if (isLoading && error == null) {
+      if (_audio.playing) await pause();
+      return;
+    }
+    await _prepareSmartResume();
     if (_selectionPending ||
         error != null ||
         (!_audio.playing &&
@@ -228,7 +242,8 @@ extension _PlayerPlayback on PlayerState {
     }
   }
 
-  Future<void> _seekPlayback(double seconds) async {
+  Future<void> _seekPlayback(double seconds,
+      {bool? resumeAfterSeek, bool syncProgress = true}) async {
     final target =
         duration > 0 ? seconds.clamp(0, duration).toDouble() : seconds;
     final seekGeneration = ++_seekGeneration;
@@ -244,7 +259,7 @@ extension _PlayerPlayback on PlayerState {
     if (_usingTranscodeStream && chapter != null) {
       _resetTranscodeClock(target);
       _suppressPositionUpdates = true;
-      final resumePlayback = isPlaying || _audio.playing;
+      final resumePlayback = resumeAfterSeek ?? (isPlaying || _audio.playing);
       final book = currentBook;
       try {
         final mediaItem = book == null
@@ -290,7 +305,11 @@ extension _PlayerPlayback on PlayerState {
       await _audio.seek(Duration(milliseconds: (target * 1000).round()));
     }
     if (seekGeneration != _seekGeneration) return;
-    await sendProgress();
+    if (syncProgress) {
+      await sendProgress();
+    } else {
+      unawaited(sendProgress());
+    }
   }
 
   Future<void> _waitForPendingTranscodeSeek() async {
@@ -344,6 +363,8 @@ extension _PlayerPlayback on PlayerState {
 
   Future<void> _nextChapter({bool fromOutro = false}) async {
     if (!fromOutro) {
+      _checkpointInBackground('chapter');
+      _pausedAt = null;
       _advancingFromOutro = false;
     }
     final chapter = currentChapter;
@@ -369,6 +390,8 @@ extension _PlayerPlayback on PlayerState {
   }
 
   Future<void> _previousChapter() async {
+    _checkpointInBackground('chapter');
+    _pausedAt = null;
     _advancingFromOutro = false;
     final chapter = currentChapter;
     final book = currentBook;
@@ -442,6 +465,14 @@ extension _PlayerPlayback on PlayerState {
     final nextChapter = chapters[index];
     if (currentChapter?.id == nextChapter.id) return;
     final book = currentBook;
+    final outro = book?.skipOutro ?? 0;
+    if (previousIndex >= 0 &&
+        index == previousIndex + 1 &&
+        duration > 0 &&
+        _furthestChapterPosition >= duration - outro - 2) {
+      _recordChapterFinished();
+    }
+    _pausedAt = null;
     final startPosition =
         book == null ? 0.0 : _startPositionFor(book, nextChapter);
     currentChapter = nextChapter;
@@ -451,13 +482,34 @@ extension _PlayerPlayback on PlayerState {
     _clearTranscodeClock();
     _usingTranscodeStream = false;
     _advancingFromOutro = false;
-    usingLocalFile = _localFilePathFromChapter(nextChapter) != null ||
-        downloadState.hasChapter(nextChapter.id);
+    final queue = _audio.audioSource;
+    final source =
+        queue is audio.ConcatenatingAudioSource && index < queue.children.length
+            ? queue.children[index]
+            : null;
+    usingLocalFile =
+        source is audio.UriAudioSource && source.uri.scheme == 'file';
+    _updateListeningCache();
     // 按集数睡眠：队列模式下集数用完则直接暂停音频。
     final shouldStopForSleep = _checkEpisodeSleepOnChapterChange();
     _notifyIfActive();
     if (shouldStopForSleep) {
       unawaited(_pauseForEpisodeSleep());
+      return;
+    }
+    if (!usingLocalFile &&
+        downloadState.hasChapter(nextChapter.id) &&
+        book != null) {
+      final generation = _playGeneration;
+      Future<void>(() async {
+        if (!_isActivePlay(generation, nextChapter.id)) return;
+        await _playChapter(book, List.of(chapters), nextChapter,
+            startAt: currentTime, autoPlay: isPlaying || _audio.playing);
+      }).catchError((Object failure) {
+        if (_isActivePlay(generation, nextChapter.id)) {
+          _handleNativePlaybackError(failure);
+        }
+      });
       return;
     }
     if (!_applyingQueueStartSeek && startPosition > 0 && book != null) {
@@ -514,6 +566,7 @@ extension _PlayerPlayback on PlayerState {
           return;
         }
         // 进度同步不能阻塞切章，原生队列已换章时也不能再多跳一章。
+        _recordChapterFinished();
         unawaited(sendProgress());
         await nextChapter(fromOutro: true);
       }).catchError((Object failure) {

@@ -16,7 +16,28 @@ class _PlayerProgress {
     required this.suspended,
     required this.needsHttpFallback,
     required this.onRemotePosition,
-  });
+  }) {
+    _retryTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_blocked && journal.pendingCount > 0) unawaited(journal.flush());
+    });
+  }
+
+  late final ListeningProgressSync journal = ListeningProgressSync(
+    api: appState.api,
+    identity: () =>
+        '${appState.serverUrl}:${appState.fnId}:${appState.user?.id}',
+    canSync: () => !_blocked,
+  );
+
+  Future<void> record(_ProgressSnapshot value) =>
+      journal.record(PendingListeningProgress(
+          bookId: value.book.id,
+          chapterId: value.chapter.id,
+          position: value.position,
+          duration: value.duration > 0
+              ? value.duration
+              : value.chapter.duration.toDouble(),
+          updatedAt: DateTime.now()));
 
   final AppState appState;
   final _ProgressSnapshot? Function() snapshot;
@@ -29,16 +50,19 @@ class _PlayerProgress {
   Timer? _pingTimer;
   Timer? _webSocketTimer;
   Timer? _httpTimer;
+  Timer? _retryTimer;
   bool _connecting = false;
   bool _disposed = false;
   int _generation = 0;
+  final Set<String> _validatedBooks = {};
 
   bool get _blocked => _disposed || appState.offlineMode || suspended();
 
   Future<void> send() async {
-    if (_blocked) return;
     final value = snapshot();
     if (value == null) return;
+    await record(value);
+    if (_blocked) return;
     if (await _sendWebSocket(value)) return;
     if (!_blocked) await _sendHttp(value);
   }
@@ -46,11 +70,16 @@ class _PlayerProgress {
   Future<void> _sendCurrentWebSocket() async {
     if (_blocked) return;
     final value = snapshot();
-    if (value != null) await _sendWebSocket(value);
+    if (value != null) {
+      await record(value);
+      if (!journal.conflicts.containsKey(value.book.id)) {
+        await _sendWebSocket(value);
+      }
+    }
   }
 
   Future<void> _sendCurrentHttp() async {
-    if (_blocked || (!kIsWeb && _socket != null && !needsHttpFallback())) {
+    if (_blocked) {
       return;
     }
     final value = snapshot();
@@ -60,13 +89,7 @@ class _PlayerProgress {
   Future<void> _sendHttp(_ProgressSnapshot value) async {
     if (_blocked) return;
     try {
-      await appState.api.post('/api/progress', data: {
-        'book_id': value.book.id,
-        'chapter_id': value.chapter.id,
-        'position': value.position,
-        'duration':
-            value.duration > 0 ? value.duration : value.chapter.duration,
-      });
+      await journal.flush();
     } catch (_) {
       // Background progress synchronization must not interrupt listening.
     }
@@ -74,9 +97,25 @@ class _PlayerProgress {
 
   Future<bool> _sendWebSocket(_ProgressSnapshot value) async {
     if (kIsWeb || _blocked || (appState.token?.isEmpty ?? true)) return false;
+    if (journal.conflicts.containsKey(value.book.id)) return false;
+    if (journal.syncing) return false;
+    final owner = journal.identity();
+    final revision = appState.api.authRevision;
     try {
       final socket = await _ensureSocket();
       if (socket == null || _blocked) return false;
+      if (!_validatedBooks.contains(value.book.id)) {
+        if (!await journal.prepareRealtime(value.book.id) || _blocked) {
+          return false;
+        }
+        _validatedBooks.add(value.book.id);
+      }
+      if (_blocked ||
+          journal.syncing ||
+          owner != journal.identity() ||
+          revision != appState.api.authRevision) {
+        return false;
+      }
       socket.add(jsonEncode({
         'type': 'progress_update',
         'book_id': value.book.id,
@@ -188,6 +227,8 @@ class _PlayerProgress {
       if (data is! Map || data['type'] != 'progress_updated') return;
       final position = _doubleValue(data['position']);
       if (position == null || !position.isFinite) return;
+      unawaited(journal.observeRemote(Map<String, dynamic>.from(data)));
+      if (journal.hasPending(data['book_id']?.toString() ?? '')) return;
       onRemotePosition(data['book_id']?.toString(),
           data['chapter_id']?.toString(), position);
     } catch (_) {
@@ -223,6 +264,7 @@ class _PlayerProgress {
 
   void closeSocket() {
     _generation++;
+    _validatedBooks.clear();
     _pingTimer?.cancel();
     _pingTimer = null;
     unawaited(_subscription?.cancel());
@@ -234,7 +276,9 @@ class _PlayerProgress {
 
   void dispose() {
     _disposed = true;
+    _retryTimer?.cancel();
     stop();
     closeSocket();
+    journal.dispose();
   }
 }

@@ -1,5 +1,6 @@
 import '../../models/_helpers.dart' show readInt, readDouble, readString;
 import '../../models/models.dart';
+import 'smart_cache_policy.dart';
 
 const legacyDownloadServerKey = 'legacy';
 
@@ -74,6 +75,7 @@ class LocalDownload {
     this.bookMetadata = const {},
     this.serverKey = legacyDownloadServerKey,
     this.serverName,
+    this.automatic = false,
   });
 
   final String chapterId;
@@ -92,6 +94,7 @@ class LocalDownload {
   final Map<String, dynamic> bookMetadata;
   final String serverKey;
   final String? serverName;
+  final bool automatic;
 
   String get storageKey => downloadRecordKey(serverKey, chapterId);
   String get bookGroupKey => downloadRecordKey(serverKey, bookId);
@@ -138,6 +141,7 @@ class LocalDownload {
       bookMetadata: asMap(json['book_metadata']),
       serverKey: readString(json, 'server_key') ?? legacyDownloadServerKey,
       serverName: readString(json, 'server_name'),
+      automatic: json['automatic'] == true,
     );
   }
 
@@ -158,6 +162,7 @@ class LocalDownload {
         if (bookMetadata.isNotEmpty) 'book_metadata': bookMetadata,
         'server_key': serverKey,
         if (serverName != null) 'server_name': serverName,
+        'automatic': automatic,
       };
 }
 
@@ -177,6 +182,7 @@ class DownloadTask {
     this.bookMetadata = const {},
     this.serverKey = legacyDownloadServerKey,
     this.serverName,
+    this.automatic = false,
     this.transcode = false,
     this.progress = 0,
     this.status = DownloadStatus.queued,
@@ -203,6 +209,7 @@ class DownloadTask {
   final Map<String, dynamic> bookMetadata;
   final String serverKey;
   final String? serverName;
+  bool automatic;
   final bool transcode;
   final DateTime createdAt;
 
@@ -243,6 +250,7 @@ class DownloadTask {
     required String serverKey,
     String? serverName,
     bool transcode = false,
+    bool automatic = false,
   }) {
     return DownloadTask(
       chapterId: chapter.id,
@@ -259,6 +267,7 @@ class DownloadTask {
       serverKey: serverKey,
       serverName: serverName,
       transcode: transcode,
+      automatic: automatic,
     );
   }
 
@@ -278,6 +287,7 @@ class DownloadTask {
       bookMetadata: asMap(json['book_metadata']),
       serverKey: readString(json, 'server_key') ?? legacyDownloadServerKey,
       serverName: readString(json, 'server_name'),
+      automatic: json['automatic'] == true,
       transcode: json['transcode'] == true,
       progress: readDouble(json, 'progress') ?? 0,
       status:
@@ -306,6 +316,7 @@ class DownloadTask {
         if (bookMetadata.isNotEmpty) 'book_metadata': bookMetadata,
         'server_key': serverKey,
         if (serverName != null) 'server_name': serverName,
+        'automatic': automatic,
         'transcode': transcode,
         'progress': progress,
         'status': status.key,
@@ -383,10 +394,14 @@ class DownloadIndex {
   const DownloadIndex(
       {this.downloads = const [],
       this.tasks = const [],
+      this.smartCache = const SmartCachePolicy(),
+      this.playedKeys = const {},
       this.maxConcurrent = 2});
   final List<LocalDownload> downloads;
   final List<DownloadTask> tasks;
   final int maxConcurrent;
+  final SmartCachePolicy smartCache;
+  final Set<String> playedKeys;
 
   factory DownloadIndex.fromJson(Object? decoded) {
     final payload = asMap(decoded);
@@ -407,6 +422,10 @@ class DownloadIndex {
     return DownloadIndex(
         downloads: downloads,
         tasks: tasks,
+        smartCache: SmartCachePolicy.fromJson(
+            asMap(asMap(payload['settings'])['smart_cache'])),
+        playedKeys:
+            (payload['played_keys'] as List? ?? []).whereType<String>().toSet(),
         maxConcurrent:
             (readInt(asMap(payload['settings']), 'max_concurrent_downloads') ??
                     2)
@@ -414,9 +433,11 @@ class DownloadIndex {
   }
 
   Map<String, dynamic> toJson({String? directory}) => {
-        'version': 2,
+        'version': 3,
+        'played_keys': playedKeys.toList(),
         'settings': {
           'max_concurrent_downloads': maxConcurrent,
+          'smart_cache': smartCache.toJson(),
           if (directory != null) 'cache_directory': directory
         },
         'downloads': downloads.map((item) => item.toJson()).toList(),

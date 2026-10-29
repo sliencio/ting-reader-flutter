@@ -126,7 +126,6 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
       animation: widget.player,
       builder: (context, _) {
         final player = widget.player;
-        final errorValue = player.error;
         final remaining = _sleepRemainingSeconds;
         final book = player.currentBook;
         final chapter = player.currentChapter;
@@ -174,7 +173,8 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
           bottomContentPadding: bottomContentPadding,
           tightControls: tightControls,
           mainButtonSize: mainButtonSize,
-          hasError: errorValue != null,
+          hasError: player.playbackStatus != null ||
+              player.progressSync.conflicts.isNotEmpty,
         );
         return Material(
           color: backgroundColor,
@@ -285,9 +285,23 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                     case 'settings':
                                       _openPlaybackSettings(player, book);
                                       break;
+                                    case 'positions':
+                                      showListeningCheckpoints(context, player);
+                                      break;
+                                    case 'sync':
+                                      showListeningSync(context, player);
+                                      break;
                                   }
                                 },
                                 itemBuilder: (context) => [
+                                  PopupMenuItem(
+                                      value: 'positions',
+                                      child: Text(context.localeText(
+                                          '进度找回', 'Restore position'))),
+                                  PopupMenuItem(
+                                      value: 'sync',
+                                      child: Text(context.localeText(
+                                          '进度同步', 'Progress sync'))),
                                   PopupMenuItem(
                                     value: 'bookmarks',
                                     child: Text(
@@ -367,31 +381,7 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                               fontSize: 14,
                             ),
                           ),
-                          if (errorValue != null) ...[
-                            const SizedBox(height: 14),
-                            Container(
-                              width: double.infinity,
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 14,
-                                vertical: 10,
-                              ),
-                              decoration: BoxDecoration(
-                                color: const Color(0xfffff1f2),
-                                borderRadius: BorderRadius.circular(14),
-                                border: Border.all(
-                                  color: const Color(0xffffcdd5),
-                                ),
-                              ),
-                              child: Text(
-                                errorValue,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Color(0xffe11d48),
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ),
-                          ],
+                          PlaybackStatusNotice(player: player),
                           SizedBox(height: tightControls ? 16 : 20),
                           Row(
                             children: [
@@ -517,6 +507,7 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                                     ? Icons.pause_rounded
                                     : Icons.play_arrow_rounded,
                                 onPressed: player.togglePlay,
+                                loading: player.isLoading,
                                 diameter: mainButtonSize,
                                 iconSize: mainIconSize,
                                 fillColor: accentColor,

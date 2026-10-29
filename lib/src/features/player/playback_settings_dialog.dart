@@ -13,6 +13,10 @@ class PlaybackSettingsDialog extends StatefulWidget {
     required this.volume,
     required this.onVolumeChanged,
     required this.onSave,
+    this.rewindSeconds = 10,
+    this.onRewindChanged,
+    this.bookSpeed,
+    this.onDefaultSpeed,
   });
 
   final int intro;
@@ -20,6 +24,10 @@ class PlaybackSettingsDialog extends StatefulWidget {
   final double volume;
   final ValueChanged<double> onVolumeChanged;
   final Future<void> Function(int intro, int outro) onSave;
+  final int rewindSeconds;
+  final ValueChanged<int>? onRewindChanged;
+  final double? bookSpeed;
+  final Future<void> Function()? onDefaultSpeed;
 
   @override
   State<PlaybackSettingsDialog> createState() => _PlaybackSettingsDialogState();
@@ -30,6 +38,7 @@ class _PlaybackSettingsDialogState extends State<PlaybackSettingsDialog> {
   late final _intro = TextEditingController(text: widget.intro.toString());
   late final _outro = TextEditingController(text: widget.outro.toString());
   late double _volume = widget.volume;
+  late int _rewindSeconds = widget.rewindSeconds;
   bool _saving = false;
   String? _error;
 
@@ -148,6 +157,30 @@ class _PlaybackSettingsDialogState extends State<PlaybackSettingsDialog> {
                                 color: context.mutedText, fontSize: 12),
                           ),
                           const SizedBox(height: 20),
+                          if (widget.onDefaultSpeed != null) ...[
+                            Text(context.localeText(
+                                '本书倍速：${widget.bookSpeed?.toStringAsFixed(1)}×',
+                                'Book speed: ${widget.bookSpeed?.toStringAsFixed(1)}×')),
+                            Text(
+                                context.localeText('播放器调整的倍速会按书籍记住。',
+                                    'Speed changes in the player are remembered per book.'),
+                                style: TextStyle(
+                                    fontSize: 12, color: context.mutedText)),
+                            Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton(
+                                    onPressed: _saving
+                                        ? null
+                                        : () async {
+                                            await widget.onDefaultSpeed!();
+                                            if (context.mounted) {
+                                              Navigator.pop(context, true);
+                                            }
+                                          },
+                                    child: Text(context.localeText(
+                                        '恢复默认倍速', 'Use default speed')))),
+                            const SizedBox(height: 12),
+                          ],
                           _field(
                               _intro,
                               context.localeText(
@@ -160,6 +193,41 @@ class _PlaybackSettingsDialogState extends State<PlaybackSettingsDialog> {
                                   '跳过片尾 (秒)', 'Skip Outro (sec)'),
                               last: true),
                           const SizedBox(height: 16),
+                          if (widget.onRewindChanged != null) ...[
+                            DropdownButtonFormField<int>(
+                              initialValue: _rewindSeconds,
+                              decoration: InputDecoration(
+                                  labelText: context.localeText('智能回退（全部书籍）',
+                                      'Smart rewind (all books)')),
+                              items: ({0, 5, 10, 15, 30, _rewindSeconds}
+                                      .toList()
+                                    ..sort())
+                                  .map((value) => DropdownMenuItem(
+                                      value: value,
+                                      child: Text(value == 0
+                                          ? context.localeText('关闭', 'Off')
+                                          : context.localeText(
+                                              '$value 秒', '$value seconds'))))
+                                  .toList(),
+                              onChanged: _saving
+                                  ? null
+                                  : (value) {
+                                      if (value != null) {
+                                        setState(() => _rewindSeconds = value);
+                                        widget.onRewindChanged!(value);
+                                      }
+                                    },
+                            ),
+                            Padding(
+                                padding:
+                                    const EdgeInsets.only(top: 8, bottom: 16),
+                                child: Text(
+                                    context.localeText('暂停满一分钟后续播时回退；手动跳转不回退。',
+                                        'Rewind after pausing for a minute. Manual navigation keeps your chosen position.'),
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: context.mutedText))),
+                          ],
                           Row(
                             children: [
                               Expanded(

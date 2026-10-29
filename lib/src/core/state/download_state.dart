@@ -6,14 +6,19 @@ import 'package:flutter/foundation.dart';
 import '../api/api_client.dart';
 import '../api/api_error.dart';
 import '../models/models.dart';
+import '../services/network_monitor.dart';
 import '../utils/urls.dart';
 import 'app_state.dart';
 import 'download/download_helpers.dart';
 import 'download/download_models.dart';
 import 'download/download_storage.dart';
 import 'download/download_transfer.dart';
+import 'download/smart_cache_policy.dart';
 
 export 'download/download_models.dart';
+export 'download/smart_cache_policy.dart';
+
+part 'download/smart_cache.dart';
 
 /// Owns task states, scheduling, waiters and cancellation. Transfers and disk
 /// snapshots have separate owners, independent of application and UI state.
@@ -24,11 +29,28 @@ export 'download/download_models.dart';
 ///   - `<serverKey>/<bookId>/cover.<ext>`                       – cached cover
 ///   - `<serverKey>/<bookId>/book.json`, `chapters.json`        – metadata
 class DownloadState extends ChangeNotifier {
-  DownloadState(this.appState, {Dio? httpClient})
-      : _transfer = DownloadTransfer(httpClient: httpClient);
+  DownloadState(this.appState,
+      {Dio? httpClient, NetworkMonitor? networkMonitor})
+      : network = networkMonitor ?? NetworkMonitor(),
+        _ownsNetwork = networkMonitor == null,
+        _transfer = DownloadTransfer(httpClient: httpClient) {
+    network.addListener(_networkChanged);
+    appState.addListener(_downloadAppChanged);
+  }
 
   final AppState appState;
   final DownloadTransfer _transfer;
+  final NetworkMonitor network;
+  final bool _ownsNetwork;
+  SmartCachePolicy smartCache = const SmartCachePolicy();
+  final Set<String> _playedKeys = {};
+  final Set<String> _capacityBlocked = {};
+  final Set<String> _policyBlocked = {};
+  Book? _cacheBook;
+  List<Chapter> _cacheChapters = [];
+  String? _cacheChapterId;
+  String? _cacheServerKey;
+  Future<void> _cacheWork = Future<void>.value();
   final DownloadStorage _storage = DownloadStorage();
   final Map<String, Timer> _completionTimers = {};
   bool _disposed = false;
@@ -47,6 +69,15 @@ class DownloadState extends ChangeNotifier {
   }
 
   void _checkTask(DownloadTask task, CancelToken token) {
+    if (task.automatic && !token.isCancelled) {
+      if (!_automaticAllowed || automaticCacheBytes > smartCache.maxBytes) {
+        _policyBlocked.add(task.storageKey);
+        if (automaticCacheBytes > smartCache.maxBytes) {
+          _capacityBlocked.add(task.storageKey);
+        }
+        token.cancel('自动缓存等待网络或可用空间');
+      }
+    }
     if (_disposed || !identical(_tasks[task.storageKey], task)) {
       if (!token.isCancelled) token.cancel('download stopped');
     }
@@ -58,6 +89,9 @@ class DownloadState extends ChangeNotifier {
   void dispose() {
     if (_disposed) return;
     _disposed = true;
+    network.removeListener(_networkChanged);
+    appState.removeListener(_downloadAppChanged);
+    if (_ownsNetwork) network.dispose();
     for (final timer in _completionTimers.values) {
       timer.cancel();
     }
@@ -77,6 +111,7 @@ class DownloadState extends ChangeNotifier {
     dispose();
     await Future.wait(_running.values.toList());
     await Future.wait(_deletions.values.toList());
+    await _cacheWork;
     await _storage.flush();
   }
 
@@ -201,6 +236,7 @@ class DownloadState extends ChangeNotifier {
     bool resumeExisting = true,
   }) async {
     _checkActive();
+    await keepChapter(chapter.id);
     if (hasChapter(chapter.id)) {
       return const DownloadRequestResult(DownloadRequestOutcome.downloaded);
     }
@@ -233,6 +269,8 @@ class DownloadState extends ChangeNotifier {
     await _storage.initialize(_checkActive);
     if (_disposed) return;
     await _loadIndex();
+    await network.start();
+    await refreshSmartCache();
     _pumpQueue();
   }
 
@@ -282,6 +320,7 @@ class DownloadState extends ChangeNotifier {
     Book book,
     Chapter chapter, {
     bool transcode = false,
+    bool automatic = false,
   }) {
     if (_disposed) throw StateError("Download state disposed");
     if (kIsWeb || _storage.directory == null) {
@@ -292,13 +331,22 @@ class DownloadState extends ChangeNotifier {
     }
     final key = _currentRecordKey(chapter.id);
     final existingTask = _tasks[key];
-    if (existingTask != null) return existingTask;
+    if (existingTask != null) {
+      if (!automatic) {
+        existingTask.automatic = false;
+        _saveIndexInBackground();
+        _notifyIfActive();
+        _pumpQueue();
+      }
+      return existingTask;
+    }
     final task = DownloadTask.fromBookChapter(
       book,
       chapter,
       serverKey: _currentServerKey,
       serverName: _currentServerName,
       transcode: transcode,
+      automatic: automatic,
     );
     _storage.preparePaths(task, transcode: shouldTranscodeDownload(task));
     _tasks[task.storageKey] = task;
@@ -330,7 +378,8 @@ class DownloadState extends ChangeNotifier {
     final existing = existingKey == null ? null : _downloads[existingKey];
     if (existing != null &&
         await _storage.existingFile(existing.filePath) != null) {
-      return existing;
+      await keepChapter(chapter.id);
+      return _downloads[existing.storageKey] ?? existing;
     }
     if (_disposed) throw StateError('Download state disposed');
     if (_currentServerKey != serverKey) {
@@ -510,6 +559,8 @@ class DownloadState extends ChangeNotifier {
     final index = await _storage.readIndex(_checkActive);
     if (index == null || _disposed) return;
     _maxConcurrentDownloads = index.maxConcurrent;
+    smartCache = index.smartCache;
+    _playedKeys.addAll(index.playedKeys);
     _downloads
       ..clear()
       ..addEntries(
@@ -526,6 +577,8 @@ class DownloadState extends ChangeNotifier {
       : _storage.saveIndex(DownloadIndex(
           downloads: _downloads.values.toList(),
           tasks: _tasks.values.toList(),
+          smartCache: smartCache,
+          playedKeys: _playedKeys,
           maxConcurrent: _maxConcurrentDownloads));
 
   void _saveIndexInBackground() {
@@ -556,6 +609,7 @@ class DownloadState extends ChangeNotifier {
     final key = task.storageKey;
     if (_running.containsKey(key)) return;
     final token = CancelToken();
+    _policyBlocked.remove(key);
     _tokens[key] = token;
     task.status = DownloadStatus.downloading;
     task.error = null;
@@ -588,7 +642,10 @@ class DownloadState extends ChangeNotifier {
           coverSource: coverSource,
           requestHeaders: requestHeaders,
           checkActive: () => _checkTask(task, token),
-          onProgress: _notifyIfActive,
+          onProgress: () {
+            _checkTask(task, token);
+            _notifyIfActive();
+          },
           retainPartial: () => identical(_tasks[task.storageKey], task));
       if (item != null &&
           (_disposed ||
@@ -608,7 +665,8 @@ class DownloadState extends ChangeNotifier {
         _notifyIfActive();
         return;
       }
-      _downloads[task.storageKey] = item;
+      _downloads[task.storageKey] = LocalDownload.fromJson(
+          {...item.toJson(), 'automatic': task.automatic});
       task.status = DownloadStatus.completed;
       task.progress = 1;
       task.receivedBytes = task.totalBytes = item.fileSize;
@@ -633,9 +691,22 @@ class DownloadState extends ChangeNotifier {
       if (_disposed || !identical(_tasks[task.storageKey], task)) return;
       if (error is DioException &&
           CancelToken.isCancel(error) &&
-          task.status == DownloadStatus.paused) {
+          (task.status == DownloadStatus.paused ||
+              _policyBlocked.contains(task.storageKey))) {
+        if (_policyBlocked.contains(task.storageKey)) {
+          task.status = DownloadStatus.queued;
+        }
+        if (_capacityBlocked.contains(task.storageKey)) {
+          final path = task.tempPath;
+          if (path != null) await _storage.deleteFile(path);
+          task.receivedBytes = 0;
+          task.progress = 0;
+        }
         await _saveIndex();
         _notifyIfActive();
+        if (_capacityBlocked.contains(task.storageKey)) {
+          unawaited(refreshSmartCache());
+        }
         return;
       }
       task.status = DownloadStatus.failed;
@@ -652,7 +723,12 @@ class DownloadState extends ChangeNotifier {
   }
 
   bool _canRunTask(DownloadTask task) {
-    return !_deletions.containsKey('*') &&
+    return !appState.offlineMode &&
+        (!task.automatic ||
+            (_automaticAllowed &&
+                !_capacityBlocked.contains(task.storageKey) &&
+                automaticCacheBytes < smartCache.maxBytes)) &&
+        !_deletions.containsKey('*') &&
         !_deletions.containsKey(task.storageKey) &&
         !_deletions.containsKey('book:${task.bookGroupKey}') &&
         (task.serverKey == legacyDownloadServerKey ||

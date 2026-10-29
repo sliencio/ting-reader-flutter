@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import '../../../core/api/api_error.dart';
 import '../../../core/models/models.dart';
+import '../../../core/state/player_state.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/home_layout.dart';
 import '../../../core/utils/application_time_zone.dart';
@@ -44,7 +45,6 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
   HomeLayoutSettings _homeLayout = const HomeLayoutSettings();
   double _playbackSpeed = 1.0;
   bool _autoPreload = true;
-  bool _autoCache = false;
   bool _ignoreAudioFocus = true;
   bool _pluginToolMenuEnabled = true;
   bool _bookshelfProgressEnabled = true;
@@ -97,12 +97,6 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
       nested: nested,
       fallback: true,
     );
-    _autoCache = _boolValue(
-      data,
-      'auto_cache',
-      nested: nested,
-      fallback: false,
-    );
     _ignoreAudioFocus = _boolValue(
       data,
       'ignore_audio_focus',
@@ -153,7 +147,7 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
         await appState.setLanguage(_language, syncRemote: false);
       }
       if (patch.containsKey('playback_speed')) {
-        await playerState.setSpeed(_playbackSpeed);
+        await playerState.applyDefaultPlaybackSpeed();
       }
       if (patch.containsKey('ignore_audio_focus')) {
         await playerState.setIgnoreAudioFocus(_ignoreAudioFocus);
@@ -382,12 +376,16 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
               playbackSpeed: _playbackSpeed,
               bookshelfProgressEnabled: _bookshelfProgressEnabled,
               autoPreload: _autoPreload,
-              autoCache: _autoCache,
+              openDownloads: widget.openDownloads,
+              rewindSeconds: AppScope.playerOf(context).smartRewindSeconds,
+              onRewind: (value) async {
+                await AppScope.playerOf(context).setSmartRewind(value);
+                if (mounted) setState(() {});
+              },
               ignoreAudioFocus: _ignoreAudioFocus,
               showAudioFocusSetting: isMobilePlatform,
               onSpeed: (value) {
                 setState(() => _playbackSpeed = value);
-                AppScope.playerOf(context).setSpeed(value);
               },
               onSpeedEnd: (value) {
                 _saveSettings({'playback_speed': value});
@@ -399,10 +397,6 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
               onAutoPreload: (value) {
                 setState(() => _autoPreload = value);
                 _saveSettings({'auto_preload': value});
-              },
-              onAutoCache: (value) {
-                setState(() => _autoCache = value);
-                _saveSettings({'auto_cache': value});
               },
               onIgnoreAudioFocus: (value) {
                 _saveAudioFocusSettings(ignoreAudioFocus: value);

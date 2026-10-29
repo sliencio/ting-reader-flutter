@@ -116,6 +116,8 @@ class DownloadStorage {
     return DownloadIndex(
         downloads: present,
         tasks: index.tasks,
+        smartCache: index.smartCache,
+        playedKeys: index.playedKeys,
         maxConcurrent: index.maxConcurrent);
   }
 

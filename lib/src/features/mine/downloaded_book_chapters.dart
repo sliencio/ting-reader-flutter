@@ -449,17 +449,26 @@ class _DownloadChapterRow extends StatelessWidget {
         overflow: TextOverflow.ellipsis,
       ),
       subtitle: Text(
-        '${formatBytes(item.fileSize)}  ·  ${_formatLocalTime(context, item.createdAt)}',
+        '${item.automatic ? context.localeText('自动缓存', 'Automatic cache') : context.localeText('手动保留', 'Kept manually')} · ${formatBytes(item.fileSize)}  ·  ${_formatLocalTime(context, item.createdAt)}',
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
       ),
       trailing: selectionMode
           ? null
-          : IconButton(
-              tooltip: context.l10n.downloadsDeleteDownload,
-              onPressed: onDelete,
-              icon: const Icon(Icons.delete_outline_rounded),
-            ),
+          : Row(mainAxisSize: MainAxisSize.min, children: [
+              if (item.automatic)
+                IconButton(
+                  tooltip: context.localeText('永久保留', 'Keep download'),
+                  onPressed: () =>
+                      AppScope.downloadOf(context).keepChapter(item.storageKey),
+                  icon: const Icon(Icons.push_pin_outlined),
+                ),
+              IconButton(
+                tooltip: context.l10n.downloadsDeleteDownload,
+                onPressed: onDelete,
+                icon: const Icon(Icons.delete_outline_rounded),
+              ),
+            ]),
     );
   }
 }

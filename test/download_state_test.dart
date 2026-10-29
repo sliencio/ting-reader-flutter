@@ -10,6 +10,7 @@ import 'package:ting_reader_flutter/src/core/models/models.dart';
 import 'package:ting_reader_flutter/src/core/state/app_state.dart';
 import 'package:ting_reader_flutter/src/core/state/download_state.dart';
 import 'package:ting_reader_flutter/src/core/state/download/download_storage.dart';
+import 'package:ting_reader_flutter/src/core/services/network_monitor.dart';
 
 class DownloadAdapter implements HttpClientAdapter {
   final requests = <RequestOptions>[];
@@ -19,6 +20,7 @@ class DownloadAdapter implements HttpClientAdapter {
   bool blocked = false;
   String? blockedHost;
   int status = 200;
+  List<int>? payload;
 
   @override
   Future<ResponseBody> fetch(RequestOptions options,
@@ -38,10 +40,11 @@ class DownloadAdapter implements HttpClientAdapter {
       });
       return response.future;
     }
-    return ResponseBody.fromString('audio', status, headers: {
-      'content-type': ['audio/mpeg'],
-      'content-length': ['5'],
-    });
+    return ResponseBody.fromBytes(payload ?? utf8.encode('audio'), status,
+        headers: {
+          'content-type': ['audio/mpeg'],
+          'content-length': ['${payload?.length ?? 5}'],
+        });
   }
 
   @override
@@ -72,8 +75,11 @@ void main() {
     app.serverUrl = 'http://server.test';
     app.activeUrl = app.serverUrl;
     adapter = DownloadAdapter();
-    downloads =
-        DownloadState(app, httpClient: Dio()..httpClientAdapter = adapter);
+    final network = NetworkMonitor(usePlatform: false);
+    addTearDown(network.dispose);
+    downloads = DownloadState(app,
+        httpClient: Dio()..httpClientAdapter = adapter,
+        networkMonitor: network);
     await downloads.setCacheDirectory(directory.path);
   });
   tearDown(() async {
@@ -81,6 +87,146 @@ void main() {
     await adapter.started.close();
     app.dispose();
     await directory.delete(recursive: true);
+  });
+
+  Future<void> waitForDownloads(bool Function() condition) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 5));
+    while (!condition()) {
+      if (DateTime.now().isAfter(deadline)) fail('下载状态等待超时');
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+  }
+
+  List<Chapter> cacheChapters() =>
+      List.generate(8, (i) => chapter('smart-$i').copyWith(chapterIndex: i));
+
+  test('智能缓存仅在允许网络运行，缓存当前章和指定后续集数', () async {
+    downloads.network.update(NetworkAccess.mobile);
+    await downloads
+        .setSmartCachePolicy(const SmartCachePolicy(enabled: true, ahead: 2));
+    final chapters = cacheChapters();
+    downloads.updatePlaybackContext(book, chapters, chapters.first.id);
+    await downloads.refreshSmartCache();
+    expect(adapter.requests, isEmpty);
+    expect(downloads.smartCacheWaitingReason, contains('Wi-Fi'));
+    downloads.network.update(NetworkAccess.wifi);
+    await waitForDownloads(() => downloads.downloads.length == 3);
+    expect(downloads.downloads.map((item) => item.chapterId),
+        ['smart-0', 'smart-1', 'smart-2']);
+    expect(downloads.downloads.every((item) => item.automatic), isTrue);
+  });
+
+  test('自动缓存超过容量时停止并清理临时文件，手动下载不受限制', () async {
+    adapter.payload = Uint8List(2 * 1024 * 1024);
+    downloads.network.update(NetworkAccess.wifi);
+    await downloads.setSmartCachePolicy(
+        const SmartCachePolicy(enabled: true, ahead: 1, maxMegabytes: 1));
+    final chapters = cacheChapters();
+    downloads.updatePlaybackContext(book, chapters, chapters.first.id);
+    await waitForDownloads(() =>
+        adapter.requests.length >= 2 &&
+        downloads.runningCount == 0 &&
+        downloads.automaticCacheBytes == 0);
+    expect(downloads.downloads, isEmpty);
+    expect(downloads.automaticCacheBytes, 0);
+    expect(downloads.failedCount, 0);
+    expect(downloads.smartCacheWaitingReason, contains('容量'));
+    final partials = await directory
+        .list(recursive: true)
+        .where((item) => item.path.endsWith('.part'))
+        .toList();
+    expect(partials, isEmpty);
+    final saved = await downloads.downloadChapter(book, chapters.first);
+    expect(saved.fileSize, 2 * 1024 * 1024);
+    expect(saved.automatic, isFalse);
+  });
+
+  test('听完后删除自动缓存，保留当前文件并随章节推进补齐', () async {
+    downloads.network.update(NetworkAccess.wifi);
+    await downloads
+        .setSmartCachePolicy(const SmartCachePolicy(enabled: true, ahead: 1));
+    final chapters = cacheChapters();
+    downloads.updatePlaybackContext(book, chapters, chapters.first.id);
+    await waitForDownloads(() => downloads.downloads.length == 2);
+    final path = downloads.findByChapter('smart-0')!.filePath;
+    await downloads.markChapterPlayed('smart-0');
+    expect(await File(path).exists(), isTrue);
+    downloads.updatePlaybackContext(book, chapters, chapters[1].id);
+    await downloads.refreshSmartCache();
+    await waitForDownloads(() => downloads.hasChapter('smart-2'));
+    expect(downloads.hasChapter('smart-0'), isFalse);
+    expect(await File(path).exists(), isFalse);
+    expect(downloads.downloads, hasLength(2));
+  });
+
+  test('保留已听缓存时容量不足可淘汰旧窗口，为新章节留出空间', () async {
+    adapter.payload = Uint8List(450 * 1024);
+    downloads.network.update(NetworkAccess.wifi);
+    await downloads.setSmartCachePolicy(const SmartCachePolicy(
+        enabled: true, ahead: 1, deletePlayed: false, maxMegabytes: 1));
+    final chapters = cacheChapters();
+    downloads.updatePlaybackContext(book, chapters, chapters.first.id);
+    await waitForDownloads(() => downloads.downloads.length == 2);
+    adapter.payload = Uint8List(700 * 1024);
+    downloads.updatePlaybackContext(book, chapters, chapters[2].id);
+    await waitForDownloads(() => downloads.hasChapter('smart-2'));
+    expect(downloads.hasChapter('smart-0'), isFalse);
+    expect(downloads.hasChapter('smart-1'), isFalse);
+    expect(downloads.automaticCacheBytes, lessThanOrEqualTo(1024 * 1024));
+  });
+
+  test('手动保留自动缓存后不再自动删除，旧下载默认也为手动保留', () async {
+    downloads.network.update(NetworkAccess.wifi);
+    await downloads
+        .setSmartCachePolicy(const SmartCachePolicy(enabled: true, ahead: 1));
+    final chapters = cacheChapters();
+    downloads.updatePlaybackContext(book, chapters, chapters.first.id);
+    await waitForDownloads(() => downloads.downloads.length == 2);
+    await downloads.requestChapter(book, chapters.first);
+    expect(downloads.findByChapter('smart-0')!.automatic, isFalse);
+    await downloads.markChapterPlayed('smart-0');
+    downloads.updatePlaybackContext(book, chapters, chapters[1].id);
+    await downloads.refreshSmartCache();
+    expect(downloads.hasChapter('smart-0'), isTrue);
+    final legacy = LocalDownload.fromJson(
+        {...downloads.findByChapter('smart-0')!.toJson()}..remove('automatic'));
+    expect(legacy.automatic, isFalse);
+  });
+
+  test('Wi-Fi 切换蜂窝会取消自动传输，恢复 Wi-Fi 后继续', () async {
+    adapter.blocked = true;
+    downloads.network.update(NetworkAccess.wifi);
+    await downloads
+        .setSmartCachePolicy(const SmartCachePolicy(enabled: true, ahead: 1));
+    final chapters = cacheChapters();
+    downloads.updatePlaybackContext(book, chapters, chapters.first.id);
+    await waitForDownloads(() => adapter.requests.isNotEmpty);
+    downloads.network.update(NetworkAccess.mobile);
+    await waitForDownloads(() => downloads.runningCount == 0);
+    expect(downloads.failedCount, 0);
+    final previous = adapter.requests.length;
+    await downloads.refreshSmartCache();
+    expect(adapter.requests.length, previous);
+    adapter.blocked = false;
+    downloads.network.update(NetworkAccess.wifi);
+    await waitForDownloads(() => downloads.downloads.length == 2);
+    expect(downloads.failedCount, 0);
+  });
+
+  test('关闭智能缓存后手动下载仍正常，设置与分类跨重启保留', () async {
+    downloads.network.update(NetworkAccess.wifi);
+    await downloads.setSmartCachePolicy(const SmartCachePolicy(
+        enabled: true, ahead: 3, deletePlayed: false, maxMegabytes: 500));
+    final saved = await downloads.downloadChapter(book, chapter('manual'));
+    expect(saved.automatic, isFalse);
+    final storage = DownloadStorage();
+    await storage.configureDirectory(directory.path, () {});
+    final index = (await storage.readIndex(() {}))!;
+    expect(index.smartCache.enabled, isTrue);
+    expect(index.smartCache.ahead, 3);
+    expect(index.smartCache.deletePlayed, isFalse);
+    expect(index.smartCache.maxMegabytes, 500);
+    expect(index.downloads.single.automatic, isFalse);
   });
 
   test(

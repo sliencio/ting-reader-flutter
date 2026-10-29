@@ -81,6 +81,7 @@ test/*
 !test/window_caption_rendering_test.dart
 !test/chapter_read_marks_test.dart
 !test/settings_push_layout_test.dart
+!test/listening_tools_test.dart
 preview_screenshots/
 real_compare_screenshots/
 web_compare_screenshots/

@@ -231,6 +231,7 @@ class _IconCircle extends StatelessWidget {
     this.iconSize,
     this.fillColor,
     this.filledIconColor,
+    this.loading = false,
   });
 
   final IconData icon;
@@ -241,6 +242,7 @@ class _IconCircle extends StatelessWidget {
   final double? iconSize;
   final Color? fillColor;
   final Color? filledIconColor;
+  final bool loading;
 
   @override
   Widget build(BuildContext context) {
@@ -261,12 +263,23 @@ class _IconCircle extends StatelessWidget {
         child: InkWell(
           customBorder: const CircleBorder(),
           onTap: () => onPressed(),
-          child: Icon(
-            icon,
-            color:
-                filled ? (filledIconColor ?? Colors.white) : context.mutedText,
-            size: resolvedIconSize,
-          ),
+          child: loading
+              ? Center(
+                  child: SizedBox(
+                      width: resolvedIconSize,
+                      height: resolvedIconSize,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: filled
+                              ? (filledIconColor ?? Colors.white)
+                              : context.mutedText)))
+              : Icon(
+                  icon,
+                  color: filled
+                      ? (filledIconColor ?? Colors.white)
+                      : context.mutedText,
+                  size: resolvedIconSize,
+                ),
         ),
       ),
     );

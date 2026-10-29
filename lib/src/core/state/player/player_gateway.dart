@@ -134,8 +134,9 @@ extension _PlayerGateway on PlayerState {
       (appState.api.isGatewaySession?.call() ?? false);
 
   Future<void> _handlePlaybackCompleted(audio.PlayerState state) async {
-    if (_disposed || _suppressPositionUpdates || _applyingQueueStartSeek)
+    if (_disposed || _suppressPositionUpdates || _applyingQueueStartSeek) {
       return;
+    }
     if (_usingAudioQueue) {
       final next = _currentChapterIndex + 1;
       if (next > 0 &&
@@ -144,6 +145,7 @@ extension _PlayerGateway on PlayerState {
         await _recoverQueueChapter(chapters[next]);
         return;
       }
+      _recordChapterFinished();
       await _audio.pause();
       await sendProgress();
       return;
@@ -170,6 +172,7 @@ extension _PlayerGateway on PlayerState {
         _seekGeneration == completionOperation.seek;
 
     _completedPlaybackOperation = completionOperation;
+    _recordChapterFinished();
     final shouldResume = state.playing || isPlaying || _audio.playing;
     _resumeAfterGatewayReauthentication =
         _resumeAfterGatewayReauthentication || shouldResume;

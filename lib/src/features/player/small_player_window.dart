@@ -47,7 +47,8 @@ class SmallPlayerWindow extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleSmall),
                 Text(
-                    player.currentChapter?.title ??
+                    player.playbackStatus ??
+                        player.currentChapter?.title ??
                         context.localeText('暂无播放内容', 'Nothing playing'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -79,9 +80,14 @@ class SmallPlayerWindow extends StatelessWidget {
               onPressed: player.hasChapter ? player.previousChapter : null),
           IconButton.filled(
               tooltip: context.localeText('播放或暂停', 'Play or pause'),
-              icon: Icon(player.isPlaying
-                  ? Icons.pause_rounded
-                  : Icons.play_arrow_rounded),
+              icon: player.isLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : Icon(player.isPlaying
+                      ? Icons.pause_rounded
+                      : Icons.play_arrow_rounded),
               onPressed: player.hasChapter ? player.togglePlay : null),
           IconButton(
               tooltip: context.localeText('下一首', 'Next'),

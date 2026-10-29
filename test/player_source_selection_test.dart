@@ -69,6 +69,9 @@ class _Downloads extends DownloadState {
   _Downloads(super.appState);
   final paths = <String, String>{};
   @override
+  bool hasChapter(String chapterId) =>
+      paths.containsKey(chapterId) || super.hasChapter(chapterId);
+  @override
   Future<String?> localPathForChapter(String chapterId) async =>
       paths[chapterId];
 }
@@ -405,6 +408,80 @@ void main() {
             book, [item], item.id, position, DateTime.utc(2020)));
   }
 
+  test('智能回退关闭时启动续播保留原始位置', () async {
+    app.settings = {'smart_rewind_seconds': 0};
+    await seedResume();
+    await player.restoreLastPlayback();
+    await player.togglePlay();
+    expect(native.initialPositions.single, 42000000);
+  });
+
+  test('手动跳转后续播不会再次智能回退', () async {
+    await seedResume();
+    await player.restoreLastPlayback();
+    await player.seek(100);
+    await player.togglePlay();
+    expect(native.initialPositions.single, 100000000);
+  });
+
+  test('切书恢复独立倍速，没有记录的新书使用默认倍速', () async {
+    final first = chapter('/server/first.mp3', id: 'first');
+    const otherBook = Book(id: 'other', libraryId: 'library', title: '另一本书');
+    const second = Chapter(
+        id: 'second',
+        bookId: 'other',
+        title: '第二本第一章',
+        path: '/server/second.mp3',
+        chapterIndex: 1);
+    await player.playChapter(book, [first], first);
+    await player.setSpeed(1.8);
+    await player.playChapter(otherBook, [second], second);
+    expect(player.playbackSpeed, 1);
+    await player.setSpeed(1.2);
+    await player.playChapter(book, [first], first);
+    expect(player.playbackSpeed, 1.8);
+    await player.useDefaultBookSpeed();
+    expect(player.playbackSpeed, 1);
+  });
+
+  test('误拖进度前保存位置，可以从进度保护记录恢复', () async {
+    final item = chapter('/server/chapter.mp3');
+    await player.playChapter(book, [item], item);
+    player.currentTime = 80;
+    await player.seek(200);
+    final entries = await player.playbackCheckpoints();
+    expect(entries.first.reason, 'seek');
+    expect(entries.first.record.position, 80);
+    await player.restoreCheckpoint(entries.first);
+    expect(native.initialPositions.last, 80000000);
+  });
+
+  test('开始睡眠定时前保存起点以便第二天找回', () async {
+    final item = chapter('/server/chapter.mp3');
+    await player.playChapter(book, [item], item);
+    player.currentTime = 123;
+    player.startSleepTimer(15);
+    final entries = await player.playbackCheckpoints();
+    expect(entries.first.reason, 'sleep');
+    expect(entries.first.record.position, 123);
+    player.cancelSleepTimer();
+  });
+
+  test('播放后才缓存的下一章会在切章时改用本地文件', () async {
+    native.holdPlayback = true;
+    final first = chapter('/server/first.mp3', id: 'first');
+    final second =
+        chapter('/server/second.mp3', id: 'second').copyWith(chapterIndex: 2);
+    await player.playChapter(book, [first, second], first);
+    final local = await localAudioFile();
+    downloads.paths[second.id] = local.path;
+    native.emit(index: 1, position: Duration.zero);
+    await waitForPlayback(() =>
+        native.sources.length >= 2 && player.currentChapter?.id == second.id);
+    expect(native.activeUri.scheme, 'file');
+    expect(native.activeUri.toFilePath(), local.path);
+  });
+
   test('startup selects local chapter without loading audio or playing',
       () async {
     await seedResume();
@@ -419,7 +496,7 @@ void main() {
     await player.togglePlay();
     await waitForPlayback(() => native.playCount == 1);
     expect(native.playCount, 1);
-    expect(native.initialPositions.single, 42000000);
+    expect(native.initialPositions.single, 32000000);
   });
 
   test('startup recovers remote history on a device without a local record',

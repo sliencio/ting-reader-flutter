@@ -443,28 +443,30 @@ class _PlaybackSection extends StatelessWidget {
     required this.playbackSpeed,
     required this.bookshelfProgressEnabled,
     required this.autoPreload,
-    required this.autoCache,
+    required this.openDownloads,
+    required this.rewindSeconds,
+    required this.onRewind,
     required this.ignoreAudioFocus,
     required this.showAudioFocusSetting,
     required this.onSpeed,
     required this.onSpeedEnd,
     required this.onBookshelfProgress,
     required this.onAutoPreload,
-    required this.onAutoCache,
     required this.onIgnoreAudioFocus,
   });
 
   final double playbackSpeed;
   final bool bookshelfProgressEnabled;
   final bool autoPreload;
-  final bool autoCache;
+  final VoidCallback? openDownloads;
+  final int rewindSeconds;
+  final ValueChanged<int> onRewind;
   final bool ignoreAudioFocus;
   final bool showAudioFocusSetting;
   final ValueChanged<double> onSpeed;
   final ValueChanged<double> onSpeedEnd;
   final ValueChanged<bool> onBookshelfProgress;
   final ValueChanged<bool> onAutoPreload;
-  final ValueChanged<bool> onAutoCache;
   final ValueChanged<bool> onIgnoreAudioFocus;
 
   @override
@@ -498,8 +500,10 @@ class _PlaybackSection extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     _SettingCopy(
-                      title: l10n.settingsPlaybackSpeed,
-                      subtitle: l10n.settingsPlaybackSpeedDescription,
+                      title: context.localeText(
+                          '默认播放倍速', 'Default playback speed'),
+                      subtitle: context.localeText('没有单独设置倍速的书籍使用此值',
+                          'Used for books without their own speed setting'),
                     ),
                     const SizedBox(height: 14),
                     SizedBox(width: double.infinity, child: speedPicker),
@@ -510,8 +514,10 @@ class _PlaybackSection extends StatelessWidget {
                 children: [
                   Expanded(
                     child: _SettingCopy(
-                      title: l10n.settingsPlaybackSpeed,
-                      subtitle: l10n.settingsPlaybackSpeedDescription,
+                      title: context.localeText(
+                          '默认播放倍速', 'Default playback speed'),
+                      subtitle: context.localeText('没有单独设置倍速的书籍使用此值',
+                          'Used for books without their own speed setting'),
                     ),
                   ),
                   SizedBox(width: 280, child: speedPicker),
@@ -528,12 +534,36 @@ class _PlaybackSection extends StatelessWidget {
             onChanged: onAutoPreload,
           ),
           _SettingDivider(),
-          _ToggleSettingRow(
-            title: l10n.settingsAutoCache,
-            subtitle: l10n.settingsAutoCacheDescription,
-            value: autoCache,
-            onChanged: onAutoCache,
+          DropdownButtonFormField<int>(
+            key: ValueKey('rewind_$rewindSeconds'),
+            initialValue: rewindSeconds,
+            decoration: InputDecoration(
+                labelText: context.localeText('智能回退', 'Smart rewind'),
+                helperText: context.localeText('暂停满一分钟后续播时回退，手动跳转不回退',
+                    'Rewind after a minute paused; manual navigation keeps your position')),
+            items: ({0, 5, 10, 15, 30, rewindSeconds}.toList()..sort())
+                .map((value) => DropdownMenuItem(
+                    value: value,
+                    child: Text(value == 0
+                        ? context.localeText('关闭', 'Off')
+                        : context.localeText('$value 秒', '$value seconds'))))
+                .toList(),
+            onChanged: (value) {
+              if (value != null) onRewind(value);
+            },
           ),
+          if (openDownloads != null)
+            Material(
+                color: Colors.transparent,
+                child: ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.download_for_offline_outlined),
+                  title: Text(context.localeText('智能缓存与下载', 'Smart downloads')),
+                  subtitle: Text(context.localeText('缓存集数、网络限制和听完自动删除',
+                      'Upcoming chapters, network limits and automatic cleanup')),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: openDownloads,
+                )),
           if (showAudioFocusSetting) ...[
             _SettingDivider(),
             _ToggleSettingRow(

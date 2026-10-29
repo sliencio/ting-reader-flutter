@@ -21,6 +21,13 @@ bool _audioFocusEnabled = true;
 
 /// Provides the [init] method to initialise just_audio for background playback.
 class JustAudioBackground {
+  static Future<void> Function()? _beforePlay;
+
+  /// 应用内播放和系统媒体按钮共用续播准备逻辑。
+  static void setBeforePlayHandler(Future<void> Function()? handler) {
+    _beforePlay = handler;
+  }
+
   static void setSeekHandler(
       Future<void> Function(Duration position)? handler) {
     _externalSeekHandler = handler;
@@ -771,6 +778,8 @@ class _PlayerAudioHandler extends BaseAudioHandler
   @override
   Future<void> play() async {
     final generation = ++_playRequestGeneration;
+    await JustAudioBackground._beforePlay?.call();
+    if (generation != _playRequestGeneration) return;
     if (_audioFocusEnabled) {
       try {
         final session = await AudioSession.instance;

@@ -7,7 +7,8 @@ import 'package:ting_reader_flutter/l10n/app_localizations.dart';
 import 'package:ting_reader_flutter/src/features/player/playback_settings_dialog.dart';
 
 Future<void> openSettings(WidgetTester tester,
-    {required Future<void> Function(int, int) onSave}) async {
+    {required Future<void> Function(int, int) onSave,
+    bool enhanced = false}) async {
   await tester.pumpWidget(MaterialApp(
     locale: const Locale('en'),
     localizationsDelegates: AppLocalizations.localizationsDelegates,
@@ -23,6 +24,9 @@ Future<void> openSettings(WidgetTester tester,
               volume: 1,
               onVolumeChanged: (_) {},
               onSave: onSave,
+              bookSpeed: enhanced ? 1.5 : null,
+              onDefaultSpeed: enhanced ? () async {} : null,
+              onRewindChanged: enhanced ? (_) {} : null,
             ),
           ),
           child: const Text('Open'),
@@ -35,6 +39,29 @@ Future<void> openSettings(WidgetTester tester,
 }
 
 void main() {
+  testWidgets('新增本书倍速和回退选项后，小屏键盘不遮挡保存按钮', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(320, 640);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetViewInsets);
+    await openSettings(tester, enhanced: true, onSave: (_, __) async {});
+    expect(find.text('Book speed: 1.5×'), findsOneWidget);
+    final outro = find.byKey(const ValueKey('skip_outro'));
+    await tester.ensureVisible(outro);
+    await tester.enterText(outro, '20');
+    tester.view.viewInsets = const FakeViewPadding(bottom: 300);
+    await tester.pumpAndSettle();
+    final save = find.widgetWithText(FilledButton, 'Save');
+    expect(tester.getBottomRight(save).dy, lessThanOrEqualTo(340));
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.byTooltip('Hide keyboard'));
+    await tester.pump();
+    expect(tester.testTextInput.isVisible, isFalse);
+    await tester.tap(save);
+    await tester.pumpAndSettle();
+    expect(find.byType(PlaybackSettingsDialog), findsNothing);
+  });
   for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
     testWidgets('$platform 键盘弹出时保存按钮可点击，键盘可以显式收起', (tester) async {
       debugDefaultTargetPlatformOverride = platform;

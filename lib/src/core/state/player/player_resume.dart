@@ -35,6 +35,8 @@ extension _PlayerResume on PlayerState {
     if (cached != null) await _selectResumeRecord(cached);
     if (!active()) return;
     if (appState.offlineMode) return;
+    await _progress.journal.initialize();
+    if (!active()) return;
     ChapterCatalogue? catalogue;
     try {
       final response = await appState.api.get('/api/progress/recent');
@@ -48,6 +50,10 @@ extension _PlayerResume on PlayerState {
             .compareTo(DateTime.tryParse(a.updatedAt ?? '') ?? DateTime(1970)));
       if (recent.isEmpty) return;
       final latest = recent.first;
+      if (_progress.journal.hasPending(latest.bookId)) {
+        unawaited(_progress.journal.flush());
+        return;
+      }
       final updated = DateTime.tryParse(latest.updatedAt ?? '');
       if (cached != null &&
           (updated == null || !updated.isAfter(cached.updatedAt))) {
@@ -88,6 +94,7 @@ extension _PlayerResume on PlayerState {
       return;
     }
     currentBook = book;
+    _connectingPlayback = false;
     chapters = sortChaptersForPlayback(record.chapters);
     currentChapter = chapter;
     duration = chapter.duration.toDouble();
@@ -100,6 +107,10 @@ extension _PlayerResume on PlayerState {
     _usingAudioQueue = false;
     _usingTranscodeStream = false;
     error = null;
+    _pausedAt = record.updatedAt;
+    _pausedChapterId = chapter.id;
+    await _applyBookSpeed(book);
+    _updateListeningCache();
     _notifyIfActive();
   }
 
@@ -114,9 +125,21 @@ extension _PlayerResume on PlayerState {
     }
     final identity = _resumeIdentity ?? _currentResumeIdentity;
     if (identity != _currentResumeIdentity) return;
+    final position = currentTime;
+    final durationSnapshot = duration;
     await _resumeStore.write(
         identity,
         PlaybackResumeRecord(
-            book, List.of(chapters), chapter.id, currentTime, DateTime.now()));
+            book, List.of(chapters), chapter.id, position, DateTime.now()));
+    if (!includePending) {
+      if (identity == _currentResumeIdentity) {
+        await _progress.record((
+          book: book,
+          chapter: chapter,
+          position: position,
+          duration: durationSnapshot
+        ));
+      }
+    }
   }
 }

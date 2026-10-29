@@ -19,6 +19,7 @@ import '../../shared/common/common_widgets.dart';
 import '../../shared/common/media_widgets.dart';
 import '../mine/bookmarks_page.dart';
 import 'playback_settings_dialog.dart';
+import 'listening_tools_panel.dart';
 
 part 'parts/chapter_sheet.dart';
 part 'parts/collapsed_mini_player.dart';
@@ -187,7 +188,9 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        localizedChapterTitle(context, chapter),
+                                        player.playbackStatus ??
+                                            localizedChapterTitle(
+                                                context, chapter),
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
@@ -241,6 +244,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                               ? Icons.pause_rounded
                                               : Icons.play_arrow_rounded,
                                           onPressed: player.togglePlay,
+                                          loading: player.isLoading,
                                           diameter: 40,
                                           iconSize: 22,
                                           fillColor: accentColor,
@@ -373,6 +377,7 @@ class _MiniPlayerState extends State<MiniPlayer> {
                                 ? Icons.pause_rounded
                                 : Icons.play_arrow_rounded,
                             onPressed: player.togglePlay,
+                            loading: player.isLoading,
                             diameter: veryTiny ? 38 : 40,
                             iconSize: veryTiny ? 21 : 22,
                             fillColor: accentColor,

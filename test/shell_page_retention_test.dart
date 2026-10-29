@@ -46,6 +46,8 @@ class _App extends AppState {
 
 class _Player extends ChangeNotifier implements PlayerState {
   @override
+  int get smartRewindSeconds => 10;
+  @override
   Book? get currentBook => null;
   @override
   bool get isMiniCollapsed => false;

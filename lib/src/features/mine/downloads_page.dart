@@ -86,6 +86,16 @@ class _DownloadsPageState extends State<DownloadsPage> {
               onOpenSettings: () => _openDownloadSettings(context),
               onClearAll: () => _clearAll(context),
             ),
+            if (downloads.smartCache.enabled)
+              Padding(
+                  padding: const EdgeInsets.only(top: 12),
+                  child: Text(
+                      downloads.smartCacheWaitingReason ??
+                          context.localeText(
+                              '智能缓存：当前章及后续 ${downloads.smartCache.ahead} 集 · 已用 ${formatBytes(downloads.automaticCacheBytes)}',
+                              'Smart downloads: current + ${downloads.smartCache.ahead} chapters · ${formatBytes(downloads.automaticCacheBytes)}'),
+                      style:
+                          TextStyle(color: context.mutedText, fontSize: 12))),
             if (downloads.activeTasks.isNotEmpty) ...[
               const SizedBox(height: 20),
               _ActiveTasks(
@@ -122,6 +132,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
     final downloads = AppScope.downloadOf(context);
     var maxConcurrentDownloads = downloads.maxConcurrentDownloads;
     String? cacheDirectory = downloads.customCacheDirectory;
+    var smartCache = downloads.smartCache;
     final result = await showDialog<_DownloadSettingsResult>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -129,11 +140,125 @@ class _DownloadsPageState extends State<DownloadsPage> {
           title: Text(context.l10n.downloadsSettingsTitle),
           content: SizedBox(
             width: 460,
-            child: Column(
+            child: SingleChildScrollView(
+                child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
+                SwitchListTile.adaptive(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(context.localeText('智能缓存', 'Smart downloads')),
+                  subtitle: Text(context.localeText('缓存正在听的章节，并提前下载后续章节',
+                      'Cache the current chapter and upcoming chapters')),
+                  value: smartCache.enabled,
+                  onChanged: (value) => setState(() => smartCache =
+                      SmartCachePolicy(
+                          enabled: value,
+                          wifiOnly: smartCache.wifiOnly,
+                          ahead: smartCache.ahead,
+                          deletePlayed: smartCache.deletePlayed,
+                          maxMegabytes: smartCache.maxMegabytes)),
+                ),
+                if (smartCache.enabled) ...[
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(context.localeText(
+                        '仅 Wi-Fi 或有线网络自动缓存', 'Only on Wi-Fi or Ethernet')),
+                    value: smartCache.wifiOnly,
+                    onChanged: (value) => setState(() => smartCache =
+                        SmartCachePolicy(
+                            enabled: true,
+                            wifiOnly: value,
+                            ahead: smartCache.ahead,
+                            deletePlayed: smartCache.deletePlayed,
+                            maxMegabytes: smartCache.maxMegabytes)),
+                  ),
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<int>(
+                    isExpanded: true,
+                    initialValue: smartCache.ahead,
+                    decoration: InputDecoration(
+                        labelText: context.localeText(
+                            '提前缓存后续集数', 'Upcoming chapters to cache')),
+                    items: ({1, 3, 5, 10, 20, 30, 50, smartCache.ahead}.toList()
+                          ..sort())
+                        .map((value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(context.localeText(
+                                '$value 集', '$value chapters'))))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => smartCache = SmartCachePolicy(
+                            enabled: true,
+                            wifiOnly: smartCache.wifiOnly,
+                            ahead: value,
+                            deletePlayed: smartCache.deletePlayed,
+                            maxMegabytes: smartCache.maxMegabytes));
+                      }
+                    },
+                  ),
+                  const SizedBox(height: 16),
+                  DropdownButtonFormField<int>(
+                    isExpanded: true,
+                    initialValue: smartCache.maxMegabytes,
+                    decoration: InputDecoration(
+                        labelText: context.localeText(
+                            '自动缓存容量上限', 'Automatic cache size limit')),
+                    items: ({
+                      100,
+                      250,
+                      500,
+                      1024,
+                      2048,
+                      5120,
+                      10240,
+                      smartCache.maxMegabytes
+                    }.toList()
+                          ..sort())
+                        .map((value) => DropdownMenuItem(
+                            value: value,
+                            child: Text(value >= 1024
+                                ? '${value / 1024} GB'
+                                : '$value MB')))
+                        .toList(),
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => smartCache = SmartCachePolicy(
+                            enabled: true,
+                            wifiOnly: smartCache.wifiOnly,
+                            ahead: smartCache.ahead,
+                            deletePlayed: smartCache.deletePlayed,
+                            maxMegabytes: value));
+                      }
+                    },
+                  ),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(context.localeText(
+                        '听完后自动删除缓存', 'Delete automatic cache after listening')),
+                    value: smartCache.deletePlayed,
+                    onChanged: (value) => setState(() => smartCache =
+                        SmartCachePolicy(
+                            enabled: true,
+                            wifiOnly: smartCache.wifiOnly,
+                            ahead: smartCache.ahead,
+                            deletePlayed: value,
+                            maxMegabytes: smartCache.maxMegabytes)),
+                  ),
+                ],
+                Padding(
+                    padding: const EdgeInsets.only(bottom: 18),
+                    child: Text(
+                        context.localeText(
+                            '手动下载的章节会永久保留，不参与自动清理。自动缓存会在客户端运行时补齐；系统挂起应用后可能暂停。',
+                            'Manual downloads are kept until you delete them. Automatic caching runs while the app is active and may pause when the system suspends it.'),
+                        style:
+                            TextStyle(fontSize: 12, color: context.mutedText))),
+                const Divider(),
+                const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
+                  isExpanded: true,
                   initialValue: maxConcurrentDownloads,
                   decoration: InputDecoration(
                     labelText: context.l10n.downloadsConcurrent,
@@ -230,7 +355,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
                   ),
                 ),
               ],
-            ),
+            )),
           ),
           actions: [
             TextButton(
@@ -243,6 +368,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
                 _DownloadSettingsResult(
                   maxConcurrentDownloads: maxConcurrentDownloads,
                   cacheDirectory: cacheDirectory,
+                  smartCache: smartCache,
                 ),
               ),
               child: Text(context.l10n.mineSave),
@@ -255,6 +381,7 @@ class _DownloadsPageState extends State<DownloadsPage> {
     try {
       await downloads.setMaxConcurrentDownloads(result.maxConcurrentDownloads);
       await downloads.setCacheDirectory(result.cacheDirectory);
+      await downloads.setSmartCachePolicy(result.smartCache);
     } catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -546,10 +673,12 @@ class _DownloadSettingsResult {
   const _DownloadSettingsResult({
     required this.maxConcurrentDownloads,
     required this.cacheDirectory,
+    required this.smartCache,
   });
 
   final int maxConcurrentDownloads;
   final String? cacheDirectory;
+  final SmartCachePolicy smartCache;
 }
 
 class _StatPill extends StatelessWidget {

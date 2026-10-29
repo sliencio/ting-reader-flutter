@@ -596,6 +596,10 @@ extension _PlaybackMenus on _ExpandedPlayerState {
         intro: activeBook.skipIntro,
         outro: activeBook.skipOutro,
         volume: player.volume,
+        rewindSeconds: player.smartRewindSeconds,
+        onRewindChanged: (value) => unawaited(player.setSmartRewind(value)),
+        bookSpeed: player.playbackSpeed,
+        onDefaultSpeed: player.useDefaultBookSpeed,
         onVolumeChanged: (value) => unawaited(player.setVolume(value)),
         onSave: (intro, outro) =>
             player.savePlaybackSettings(book, intro, outro),
