@@ -345,6 +345,14 @@ void main() {
     await Future<void>.delayed(Duration.zero);
   }
 
+  Future<File> localAudioFile() async {
+    final directory =
+        await Directory.systemTemp.createTemp('ting-player-source-');
+    addTearDown(() => directory.delete(recursive: true));
+    return File('${directory.path}${Platform.pathSeparator}chapter.mp3')
+        .writeAsBytes([]);
+  }
+
   setUpAll(() async {
     AudioServicePlatform.instance = MethodChannelAudioService();
     cacheDirectory =
@@ -984,9 +992,11 @@ void main() {
     final second = chapter('/data/second.mp3', id: 'second', index: 1);
     final items = [first, second];
     await player.playChapter(book, items, first);
-    downloads.paths[second.id] = 'C:/cache/second.mp3';
+    final localFile = await localAudioFile();
+    downloads.paths[second.id] = localFile.path;
     await player.playChapter(book, items, second);
     expect(native.sources, hasLength(2));
+    expect(native.activeUri, localFile.uri);
     expect(native.activeUri.scheme, 'file');
   });
 
@@ -1353,14 +1363,6 @@ void main() {
     expect(value['position'], 12);
     expect(value.containsKey('playback_start'), isFalse);
   });
-
-  Future<File> localAudioFile() async {
-    final directory =
-        await Directory.systemTemp.createTemp('ting-player-source-');
-    addTearDown(() => directory.delete(recursive: true));
-    return File('${directory.path}${Platform.pathSeparator}chapter.mp3')
-        .writeAsBytes([]);
-  }
 
   for (final path in [
     'D:/ting-reader/ting-reader/backend/storage/乱世书/极品家丁-第0001章-公子，公子.(m4a).strm',
