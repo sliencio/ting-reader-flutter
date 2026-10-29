@@ -306,6 +306,32 @@ jobs:
         with:
           path: dist
           merge-multiple: true
+      - name: 读取发布说明
+        env:
+          RELEASE_VERSION: ${{ github.ref_name }}
+          RELEASE_EVENT: ${{ github.event_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          if os.environ["RELEASE_EVENT"] == "workflow_dispatch":
+              heading = "## 未发布"
+              matches = lambda line: line == heading
+          else:
+              version = os.environ["RELEASE_VERSION"].removeprefix("v")
+              heading = f"## {version} - "
+              matches = lambda line: line.startswith(heading)
+          start = next((i for i, line in enumerate(lines) if matches(line)), None)
+          if start is None:
+              raise SystemExit(f"Missing changelog: {heading}")
+          end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
+          notes = "\n".join(lines[start + 1:end]).strip()
+          if not notes:
+              raise SystemExit(f"Empty changelog: {heading}")
+          Path("release-notes.md").write_text(notes + "\n", encoding="utf-8")
+          PY
       - name: Update Beta Tag
         if: github.event_name == 'workflow_dispatch'
         run: |
@@ -319,34 +345,13 @@ jobs:
         with:
           tag_name: beta
           name: Beta Release
-          body: "Latest beta build of the Ting Reader Flutter client."
+          body_path: release-notes.md
           prerelease: true
           make_latest: false
           overwrite_files: true
           files: dist/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Read release notes
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          RELEASE_VERSION: ${{ github.ref_name }}
-        run: |
-          python3 - <<'PY'
-          import os
-          from pathlib import Path
-
-          version = os.environ["RELEASE_VERSION"].removeprefix("v")
-          lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
-          heading = f"## {version} - "
-          start = next((i for i, line in enumerate(lines) if line.startswith(heading)), None)
-          if start is None:
-              raise SystemExit(f"Missing changelog for {version}")
-          end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
-          notes = "\n".join(lines[start + 1:end]).strip()
-          if not notes:
-              raise SystemExit(f"Empty changelog for {version}")
-          Path("release-notes.md").write_text(notes + "\n", encoding="utf-8")
-          PY
       - name: Publish Formal Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2

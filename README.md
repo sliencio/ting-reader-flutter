@@ -1,72 +1,51 @@
-# Ting Reader Flutter
+# 听悦客户端 · Ting Reader Flutter
 
-Ting Reader Flutter 是听悦的跨平台客户端，用于连接 Ting Reader 服务端，提供书架、书单、下载、本地离线播放和沉浸式播放体验。
+听悦的跨平台有声书客户端，使用 Flutter 开发，支持 Android、iOS、Windows、macOS 和 Linux。连接自己的听悦服务端，即可浏览书库、管理书架与书单、收听有声书，以及下载章节离线播放。
 
-## 平台能力
+本项目基于 [dqsq2e2/ting-reader-flutter](https://github.com/dqsq2e2/ting-reader-flutter) 开源项目进行改进，持续完善客户端的使用体验。
 
-| 平台 | 播放 | 后台/系统媒体控制 | 本地下载 | 说明 |
-| --- | --- | --- | --- | --- |
-| Android | 支持 | 支持通知栏和锁屏媒体控制 | 支持 | 已配置通知权限、前台播放服务和 HTTP 局域网访问。 |
-| iOS | 支持 | 支持系统 Now Playing/锁屏控制 | 支持 | 需要正常签名，并启用 Background Modes: Audio。 |
-| macOS | 支持 | 支持系统媒体集成 | 支持 | 已启用 audio background 和网络客户端 entitlement。 |
-| Windows | 支持 | 当前未接入系统媒体通知 | 支持 | 播放由 `just_audio_windows` 提供；系统媒体控制需要后续专门实现。 |
-| Linux | 支持 | 当前未接入 MPRIS | 支持 | 播放由 `just_audio_media_kit` + `media_kit_libs_linux` 提供。 |
-| Web | 支持 | 受浏览器后台策略限制 | 浏览器能力受限 | 适合预览和桌面浏览器使用。 |
+## 下载
 
-## 本地开发
+前往本仓库的 [Releases 页面](https://github.com/sliencio/ting-reader-flutter/releases) 下载客户端，也可以直接查看 [Beta 测试版](https://github.com/sliencio/ting-reader-flutter/releases/tag/beta)。
 
-各平台的本地打包脚本和运行方法见 [打包说明](scripts/README.md)。iOS 在 Mac 上可直接执行 `bash scripts/build_ios.sh`，成品输出到 `dist/`。
+| 平台 | 文件 | 使用方式 |
+| --- | --- | --- |
+| Android | `ting-reader-flutter-android.apk` | 下载并安装 APK。 |
+| Windows | `TingReader-windows-x64-setup.exe` | 运行安装程序。 |
+| macOS | `TingReader-macos.zip` | 解压后使用其中的 `.app`。 |
+| Linux | `TingReader-linux-x64.tar.gz` | 解压并保留完整目录后运行。 |
+| iOS | `TingReader-ios-self-sign.ipa` | 未签名的真机包，需要自行签名后安装。 |
 
-```powershell
-flutter pub get
-flutter analyze
-flutter test
-flutter run -d windows
-```
+具体更新内容见各版本的 Release 说明和 [更新日志](CHANGELOG.md)。
 
-Android 调试：
+## 开始使用
 
-```powershell
-flutter run -d android
-flutter build apk --release
-```
+1. 准备可访问的 [听悦服务端](https://github.com/dqsq2e2/ting-reader)。
+2. 安装对应平台的客户端，填写服务端地址并登录。
+3. 浏览书库，选择书籍和章节开始收听。
 
-Windows 安装包构建（需要安装 Inno Setup 6 或 7）：
+## 开发与打包
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\build.ps1 windows
-```
-
-生成的 EXE 安装包和便携 ZIP 位于 `dist/`。已有 Flutter 构建目录时，可追加 `-PackageOnly` 直接封装。
-
-Linux 构建需要系统依赖：
+当前工程使用 Flutter 3.47.0，Dart 随 Flutter 提供。在工程根目录执行：
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y ninja-build libgtk-3-dev
-flutter build linux --release
+flutter pub get --enforce-lockfile
+flutter analyze --no-fatal-infos
+flutter test --no-pub
+flutter run
 ```
 
-## 发布产物
+各平台的环境要求、打包命令和输出位置见 [本地打包说明](scripts/README.md)。跨平台传输源码时，请保留 `third_party/` 目录。
 
-GitHub Actions 会在推送 `v*` tag 或手动触发时构建以下产物：
+GitHub Actions 的配置位于 [`.github/workflows/`](.github/workflows/)：手动运行 `Build Releases` 会构建各平台客户端并更新 Beta Release；推送 `v*` 版本标签会构建并发布对应的正式版本。发布说明维护在 `CHANGELOG.md` 中，Beta 读取“未发布”条目，正式版读取对应版本条目。
 
-- `ting-reader-flutter-android.apk`
-- `ting-reader-flutter-android.aab`
-- `TingReader-windows-x64-setup.exe`
-- `TingReader-linux-x64.tar.gz`
-- `TingReader-macos.zip`
-- `TingReader-ios-nosign.zip`
+## 来源与致谢
 
-官网客户端下载接口会读取 `dqsq2e2/ting-reader-flutter` 的最新 Release，并使用这些固定文件名生成下载链接。
+- 原客户端仓库：[dqsq2e2/ting-reader-flutter](https://github.com/dqsq2e2/ting-reader-flutter)
+- 听悦服务端仓库：[dqsq2e2/ting-reader](https://github.com/dqsq2e2/ting-reader)
 
-## 平台注意事项
-
-- Android 13+ 首次启动会主动请求通知权限，避免通知栏播放器不可用。
-- Windows 和 Linux 当前只保证应用内播放；系统级媒体通知/锁屏控制未接入。
-- Linux 播放走 media_kit native libs；如果发行版改为系统 libmpv，需要同步调整打包依赖。
-- iOS/macOS 的系统媒体能力需要真实设备和签名环境验证。
+感谢原作者开源听悦项目，也感谢所有贡献者的开发与维护。这个客户端建立在原项目及相关开源组件的工作之上。
 
 ## 开源协议
 
-本项目采用 [GNU Affero General Public License v3.0](LICENSE) 协议（SPDX：`AGPL-3.0-only`）。
+本项目沿用原项目的 [GNU Affero General Public License v3.0](LICENSE) 协议（SPDX：`AGPL-3.0-only`），保留原项目的版权与许可声明。
