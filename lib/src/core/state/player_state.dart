@@ -21,6 +21,7 @@ import '../services/playback_skip_store.dart';
 import '../services/listening_preferences.dart';
 import '../services/listening_progress_sync.dart';
 import '../services/playback_checkpoints.dart';
+import '../services/socket_heartbeat.dart';
 import 'app_state.dart';
 import 'download_state.dart';
 import 'gateway_media_guard.dart';
@@ -133,7 +134,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
       audio_background.JustAudioBackground.setAudioFocusEnabled(true);
     }
     _audioSessionReady = _initializeAudioSession();
-    downloadState.network.addListener(_onListeningConnectionChanged);
+    downloadState.network.addListener(_onListeningNetworkChanged);
     appState.addListener(_onListeningConnectionChanged);
     _progress.journal.addListener(_notifyIfActive);
     unawaited(_progress.journal.initialize());
@@ -561,7 +562,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   @override
   void dispose() {
     _disposed = true;
-    downloadState.network.removeListener(_onListeningConnectionChanged);
+    downloadState.network.removeListener(_onListeningNetworkChanged);
     appState.removeListener(_onListeningConnectionChanged);
     _progress.journal.removeListener(_notifyIfActive);
     _sleep.dispose();

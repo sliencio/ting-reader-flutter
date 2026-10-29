@@ -15,6 +15,7 @@ import '../api/plugin_capabilities_api.dart';
 import '../document_reader/document_reader.dart';
 import '../plugin_extensions/registry.dart';
 import '../models/models.dart';
+import '../services/session_monitor.dart';
 import '../utils/client_device_headers.dart';
 import '../utils/application_time_zone.dart' as app_time_zone;
 import '../utils/locale.dart';
@@ -28,6 +29,7 @@ part 'app/app_connection_resolver.dart';
 part 'app/app_startup.dart';
 part 'app/app_authentication.dart';
 part 'app/app_gateway.dart';
+part 'app/app_session_recovery.dart';
 
 bool _isFnosGatewayModeValue(Object? value) {
   final normalized = value
@@ -52,6 +54,8 @@ class AppState extends ChangeNotifier {
     api.allowBadCertificate =
         () => serverMode == ServerProfileMode.fnosGateway && fnConnectIgnoreSsl;
     api.onGatewaySessionExpired = _handleGatewaySessionExpired;
+    api.onSessionExpired = _handleDirectSessionExpired;
+    api.sessionIdentity = () => _sessionIdentity;
   }
 
   final ApiClient api = ApiClient();
@@ -107,6 +111,8 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _cancelDirectSessionRecovery();
+    _sessionMonitor.dispose();
     if (_ownsFnConnect) fnConnect.dispose();
     clientExtensions.dispose();
     pluginCapabilities.invalidateClientExtensionsCache();
@@ -115,6 +121,8 @@ class AppState extends ChangeNotifier {
     _connections.dispose();
     api.recoverBaseUrl = null;
     api.onGatewaySessionExpired = null;
+    api.onSessionExpired = null;
+    api.sessionIdentity = null;
     api.isGatewaySession = null;
     api.allowBadCertificate = null;
     onGatewayLoginRequired = null;
@@ -128,6 +136,24 @@ class AppState extends ChangeNotifier {
   Future<String?>? _activeUrlRecovery;
   Future<bool>? _gatewaySessionRecovery;
   CancelToken? _gatewayRecoveryCancelToken;
+  Future<bool>? _directSessionRecovery;
+  CancelToken? _directRecoveryCancelToken;
+  int _directRecoveryGeneration = 0;
+  String? _directRetryIdentity;
+  DateTime? _directRetryAfter;
+  bool needsDirectLogin = false;
+  String get _sessionIdentity =>
+      '${serverMode.name}|$serverUrl|$localServerUrl|$fnId|${user?.id}|${user?.username}';
+  late final SessionMonitor _sessionMonitor = SessionMonitor(
+    enabled: () =>
+        !_disposed &&
+        !offlineMode &&
+        (token?.isNotEmpty ?? false) &&
+        user != null,
+    check: (cancel) async {
+      await api.get('/api/me', cancelToken: cancel);
+    },
+  );
   Future<void> Function()? onGatewayLoginRequired;
   Future<void> Function()? onGatewayLoginRestored;
 
@@ -315,6 +341,12 @@ class AppState extends ChangeNotifier {
   Future<void> handleGatewaySessionExpired() async {
     await _handleGatewaySessionExpired();
   }
+
+  Future<bool> recoverSession() => serverMode == ServerProfileMode.fnosGateway
+      ? _handleGatewaySessionExpired()
+      : _handleDirectSessionExpired();
+  void startSessionMonitoring() => _sessionMonitor.start();
+  Future<bool> checkSession() => _sessionMonitor.checkNow();
 
   Future<void> setFnConnectOrder(List<FnConnectCandidateGroup> order) =>
       _setGatewayOrder(order);

@@ -1492,6 +1492,43 @@ void main() {
     ]);
   });
 
+  test('暂停期间 WebSocket 断线也会自动重连，网络断线不触发重登', () async {
+    final previous = HttpOverrides.current;
+    HttpOverrides.global = null;
+    addTearDown(() => HttpOverrides.global = previous);
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    final sockets = <WebSocket>[];
+    final connectedAgain = Completer<void>();
+    server.listen((request) async {
+      final socket = await WebSocketTransformer.upgrade(request);
+      sockets.add(socket);
+      socket.listen((_) {});
+      if (sockets.length >= 2 && !connectedAgain.isCompleted) {
+        connectedAgain.complete();
+      }
+    });
+    addTearDown(() async {
+      for (final socket in sockets) {
+        await socket.close();
+      }
+      await server.close(force: true);
+    });
+    app.offlineMode = false;
+    app.activeUrl = 'http://127.0.0.1:${server.port}';
+    app.api.configure(baseUrl: app.activeUrl, token: app.token);
+    player.currentBook = book;
+    player.currentChapter = chapter('/server/chapter.mp3');
+    await player.sendProgress();
+    expect(player.isPlaying, isFalse);
+    expect(sockets, hasLength(1));
+    await sockets.first.close(WebSocketStatus.goingAway);
+    await connectedAgain.future.timeout(const Duration(seconds: 5));
+    expect(sockets, hasLength(2));
+    expect(app.token, 'fixture');
+    expect(app.api.sessionProbes.where((path) => path.contains('/api/auth/')),
+        isEmpty);
+  });
+
   test('progress synchronization sends one consistent chapter snapshot',
       () async {
     final previousOverrides = HttpOverrides.current;

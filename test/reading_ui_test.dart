@@ -418,6 +418,19 @@ Future<void> _pump(
 }
 
 void main() {
+  testWidgets('直连登录过期时在应用内显示重登提示', (tester) async {
+    final app = _ReadingApp()
+      ..needsDirectLogin = true
+      ..connectionError = 'Session expired. Sign in without restarting.';
+    final player = _ReadingPlayer();
+    addTearDown(app.dispose);
+    addTearDown(player.dispose);
+    await _pump(tester, app, player, const LoginPage());
+    expect(find.text('Session expired. Sign in without restarting.'),
+        findsOneWidget);
+    expect(find.byType(LoginPage), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
   for (final width in [320.0, 1024.0]) {
     testWidgets('下载设置在宽度 $width 可滚动配置智能缓存且可关闭', (tester) async {
       tester.view.devicePixelRatio = 1;

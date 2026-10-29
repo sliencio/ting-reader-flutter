@@ -125,6 +125,13 @@ extension ListeningTools on PlayerState {
     _notifyIfActive();
   }
 
+  void _onListeningNetworkChanged() {
+    if (_disposed) return;
+    _progress.connectionChanged();
+    if (!downloadState.network.offline) unawaited(appState.checkSession());
+    _onListeningConnectionChanged();
+  }
+
   Future<void> resolveProgressConflict(String bookId,
       {required bool useRemote}) async {
     _checkpointInBackground('sync');
