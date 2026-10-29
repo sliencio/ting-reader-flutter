@@ -215,6 +215,20 @@ class _AppShellState extends State<AppShell> {
       });
 
   void _closeSettings() => setState(() => _settingsOpen = false);
+
+  void _goHome() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    _navigate(() {
+      _navigation.go(AppDestination.bookshelf);
+      _settingsOpen = false;
+    });
+  }
+
+  Widget _homeButton() => IconButton(
+        tooltip: context.localeText('返回主页', 'Home'),
+        icon: const Icon(Icons.home_outlined),
+        onPressed: _goHome,
+      );
   void _openPluginLogs(PluginItem plugin) =>
       _navigate(() => _navigation.openPluginLogs(plugin));
   void _openPluginPage(ClientExtensionDescriptor extension) =>
@@ -313,7 +327,11 @@ class _AppShellState extends State<AppShell> {
                       showMiniPlayer ? 110.0 + bottomInset : 24.0 + bottomInset;
                   return SettingsPushLayout(
                     open: _settingsOpen,
+                    onOpen: _openSettings,
                     onClose: _closeSettings,
+                    swipeEnabled: !player.isExpanded &&
+                        [TargetPlatform.android, TargetPlatform.iOS]
+                            .contains(Theme.of(context).platform),
                     panel: _settingsCreated
                         ? _settingsPanel()
                         : const SizedBox.shrink(),
@@ -324,6 +342,7 @@ class _AppShellState extends State<AppShell> {
                             bottom: false,
                             child: Column(children: [
                               Row(children: [
+                                if (!_settingsOpen) _homeButton(),
                                 if (!_settingsOpen)
                                   IconButton(
                                     tooltip:
@@ -473,6 +492,7 @@ class _AppShellState extends State<AppShell> {
         child: Scaffold(
           body: SafeArea(
             child: Column(children: [
+              if (compact) _homeButton(),
               Padding(
                 padding: EdgeInsets.only(
                     left: compact ? 0 : 20, right: compact ? 0 : 8),
@@ -481,6 +501,7 @@ class _AppShellState extends State<AppShell> {
                         ? MainAxisAlignment.center
                         : MainAxisAlignment.start,
                     children: [
+                      if (!compact) _homeButton(),
                       if (!compact)
                         Expanded(
                             child: Text(context.localeText('设置', 'Settings'),

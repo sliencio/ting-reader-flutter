@@ -4,6 +4,76 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ting_reader_flutter/src/features/settings_push_layout.dart';
 
 void main() {
+  for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
+    testWidgets('$platform 左右滑动控制设置，保留点击和纵向滚动操作', (tester) async {
+      tester.view.physicalSize = const Size(390, 844);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      var open = false;
+      var opens = 0;
+      var closes = 0;
+      var clicks = 0;
+      var volume = 0.2;
+      const pageKey = ValueKey('swipe-page');
+      await tester.pumpWidget(MaterialApp(
+        theme: ThemeData(platform: platform),
+        home: StatefulBuilder(builder: (context, update) {
+          return SettingsPushLayout(
+            open: open,
+            swipeEnabled: true,
+            onOpen: () => update(() {
+              open = true;
+              opens++;
+            }),
+            onClose: () => update(() {
+              open = false;
+              closes++;
+            }),
+            panel: const Material(child: Text('Settings')),
+            child: Material(
+              key: pageKey,
+              child: ListView(children: [
+                TextButton(onPressed: () => clicks++, child: const Text('Tap')),
+                Slider(
+                    value: volume,
+                    onChanged: (value) => update(() => volume = value)),
+                const SizedBox(height: 1200),
+              ]),
+            ),
+          );
+        }),
+      ));
+      final page = tester.element(find.byKey(pageKey));
+      await tester.tap(find.text('Tap'));
+      expect(clicks, 1);
+      await tester.timedDragFrom(const Offset(150, 350), const Offset(20, 0),
+          const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(open, isFalse);
+      await tester.drag(find.byType(Slider), const Offset(100, 0));
+      await tester.pumpAndSettle();
+      expect(volume, greaterThan(0.2));
+      expect(opens, 0);
+      await tester.dragFrom(const Offset(90, 350), const Offset(180, 0));
+      await tester.pumpAndSettle();
+      expect(open, isTrue);
+      expect(opens, 1);
+      expect(tester.getRect(find.byKey(pageKey)).left, 72);
+      final scrollable = tester.state<ScrollableState>(find.byType(Scrollable));
+      await tester.dragFrom(const Offset(220, 600), const Offset(0, -200));
+      await tester.pumpAndSettle();
+      expect(scrollable.position.pixels, greaterThan(0));
+      expect(open, isTrue);
+      await tester.dragFrom(const Offset(260, 350), const Offset(-180, 0));
+      await tester.pumpAndSettle();
+      expect(open, isFalse);
+      expect(closes, 1);
+      expect(identical(tester.element(find.byKey(pageKey)), page), isTrue);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
   for (final platform in [
     TargetPlatform.android,
     TargetPlatform.iOS,

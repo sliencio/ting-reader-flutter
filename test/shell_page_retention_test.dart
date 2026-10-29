@@ -288,7 +288,9 @@ void main() {
       await _pump(tester, Size(width, 1000));
       final page = tester.element(find.byType(BookshelfPage));
       final before = tester.getRect(find.byType(BookshelfPage));
-      expect(tester.getTopLeft(find.byTooltip('Settings')).dx, lessThan(24));
+      expect(tester.getTopLeft(find.byTooltip('Home')).dx, lessThan(24));
+      expect(tester.getTopLeft(find.byTooltip('Settings')).dx,
+          greaterThan(tester.getTopLeft(find.byTooltip('Home')).dx));
       await tester.tap(find.byTooltip('Settings'));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 130));
@@ -306,6 +308,65 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
+    testWidgets('$platform 设置支持右滑打开左滑隐藏，主页键清除子页并保留书架', (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
+      try {
+        final (app, _) = await _pump(tester, const Size(390, 844));
+        final shelf = tester.state(find.byType(BookshelfPage));
+        await tester.dragFrom(const Offset(150, 24), const Offset(140, 0));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Close settings').hitTestable(), findsOneWidget);
+        await _select(tester, 'Playback & appearance');
+        final settings = tester.state(find.byType(PersonalizationPage));
+        await tester.dragFrom(const Offset(220, 24), const Offset(-140, 0));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
+        expect(
+            identical(tester.state(find.byType(PersonalizationPage)), settings),
+            isTrue);
+        await tester.dragFrom(const Offset(150, 24), const Offset(140, 0));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Close settings').hitTestable(), findsOneWidget);
+        await _select(tester, 'Favorites');
+        final requests = List<String>.of(app.client.requests);
+        await tester.tap(find.byTooltip('Home').hitTestable());
+        await tester.pumpAndSettle();
+        expect(find.byType(FavoritesPage), findsNothing);
+        expect(
+            identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
+        expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
+        expect(app.client.requests, requests);
+        expect(tester.getTopLeft(find.byTooltip('Home').hitTestable()).dx,
+            lessThan(24));
+        expect(tester.takeException(), isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    });
+  }
+
+  testWidgets('桌面主页键也能返回主页，横向拖动不打开设置', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    try {
+      await _pump(tester, const Size(1440, 1000));
+      await tester.dragFrom(const Offset(200, 24), const Offset(200, 0));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Settings'), findsOneWidget);
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await _select(tester, 'Favorites');
+      await tester.tap(find.byTooltip('Home').hitTestable());
+      await tester.pumpAndSettle();
+      expect(find.byType(BookshelfPage), findsOneWidget);
+      expect(find.byType(FavoritesPage), findsNothing);
+      expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   testWidgets('force refresh discards retained shelf and details',
       (tester) async {
