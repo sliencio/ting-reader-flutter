@@ -723,6 +723,12 @@ class DownloadState extends ChangeNotifier {
   }
 
   bool _canRunTask(DownloadTask task) {
+    // 自动缓存逐集补齐，避免后续章节抢占当前章节空间或相互触发容量取消。
+    if (task.automatic &&
+        _running.keys.any((key) =>
+            key != task.storageKey && _tasks[key]?.automatic == true)) {
+      return false;
+    }
     return !appState.offlineMode &&
         (!task.automatic ||
             (_automaticAllowed &&

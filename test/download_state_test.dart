@@ -116,6 +116,23 @@ void main() {
     expect(downloads.downloads.every((item) => item.automatic), isTrue);
   });
 
+  test('自动缓存按收听顺序逐集执行，手动下载仍可并行', () async {
+    adapter.blocked = true;
+    downloads.network.update(NetworkAccess.wifi);
+    await downloads
+        .setSmartCachePolicy(const SmartCachePolicy(enabled: true, ahead: 2));
+    final chapters = cacheChapters();
+    downloads.updatePlaybackContext(book, chapters, chapters.first.id);
+    await downloads.refreshSmartCache();
+    await waitForDownloads(() => adapter.requests.isNotEmpty);
+    expect(adapter.requests, hasLength(1));
+    expect(adapter.requests.single.uri.path, endsWith('/smart-0'));
+    downloads.queueChapter(book, chapter('manual-parallel'));
+    await waitForDownloads(() => adapter.requests.length == 2);
+    expect(adapter.requests.last.uri.path, endsWith('/manual-parallel'));
+    expect(downloads.runningCount, 2);
+  });
+
   test('自动缓存超过容量时停止并清理临时文件，手动下载不受限制', () async {
     adapter.payload = Uint8List(2 * 1024 * 1024);
     downloads.network.update(NetworkAccess.wifi);
@@ -169,7 +186,10 @@ void main() {
     await waitForDownloads(() => downloads.downloads.length == 2);
     adapter.payload = Uint8List(700 * 1024);
     downloads.updatePlaybackContext(book, chapters, chapters[2].id);
-    await waitForDownloads(() => downloads.hasChapter('smart-2'));
+    await waitForDownloads(() =>
+        downloads.hasChapter('smart-2') &&
+        downloads.runningCount == 0 &&
+        downloads.automaticCacheBytes <= 1024 * 1024);
     expect(downloads.hasChapter('smart-0'), isFalse);
     expect(downloads.hasChapter('smart-1'), isFalse);
     expect(downloads.automaticCacheBytes, lessThanOrEqualTo(1024 * 1024));
