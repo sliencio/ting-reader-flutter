@@ -22,6 +22,7 @@ extension _PlayerPlayback on PlayerState {
     List<Chapter> chapterList,
     Chapter chapter, {
     double? startAt,
+    bool autoPlay = true,
   }) async {
     final playGeneration = ++_playGeneration;
     _selectionPending = false;
@@ -36,6 +37,7 @@ extension _PlayerPlayback on PlayerState {
     if (nextChapters.every((item) => item.id != chapter.id)) {
       nextChapters = sortChaptersForPlayback([...nextChapters, chapter]);
     }
+    if (currentBook?.id != book.id) _failedQueueChapters.clear();
     final reuseQueue = _canReuseAudioQueue(book, nextChapters);
     currentBook = book;
     chapters = nextChapters;
@@ -115,7 +117,8 @@ extension _PlayerPlayback on PlayerState {
       await _audio.setSpeed(playbackSpeed);
       await _audio.setVolume(volume);
       if (!_isActivePlay(playGeneration, targetChapter.id)) return;
-      await _playWithSession();
+      if (autoPlay) await _playWithSession();
+      _failedQueueChapters.remove(targetChapter.id);
       _startProgressTimer();
     } catch (err) {
       if (!_isActivePlay(playGeneration, targetChapter.id)) return;
@@ -161,7 +164,8 @@ extension _PlayerPlayback on PlayerState {
           _notifyIfActive();
         }
         if (!_isActivePlay(playGeneration, targetChapter.id)) return;
-        await _playWithSession();
+        if (autoPlay) await _playWithSession();
+        _failedQueueChapters.remove(targetChapter.id);
         _startProgressTimer();
       } catch (_) {
         if (!_isActivePlay(playGeneration, targetChapter.id)) return;
@@ -177,9 +181,14 @@ extension _PlayerPlayback on PlayerState {
 
   Future<void> _togglePlayback() async {
     if (!hasChapter) return;
-    if (_selectionPending) {
+    if (_selectionPending ||
+        error != null ||
+        (!_audio.playing &&
+            (_audio.processingState == audio.ProcessingState.completed ||
+                _audio.processingState == audio.ProcessingState.idle))) {
+      final atEnd = _audio.processingState == audio.ProcessingState.completed;
       await playChapter(currentBook!, chapters, currentChapter!,
-          startAt: currentTime);
+          startAt: atEnd ? currentBook!.skipIntro.toDouble() : currentTime);
       return;
     }
     if (_gatewayReauthenticationPending) {
@@ -340,7 +349,8 @@ extension _PlayerPlayback on PlayerState {
         _usingAudioQueue &&
         _audio.hasNext &&
         index >= 0 &&
-        index < chapters.length - 1) {
+        index < chapters.length - 1 &&
+        !_failedQueueChapters.contains(chapters[index + 1].id)) {
       await _seekAudioQueueToChapter(index + 1, book, chapters[index + 1]);
       _advancingFromOutro = false;
       return;
@@ -362,7 +372,8 @@ extension _PlayerPlayback on PlayerState {
     if (!_usingTranscodeStream &&
         _usingAudioQueue &&
         _audio.hasPrevious &&
-        index > 0) {
+        index > 0 &&
+        !_failedQueueChapters.contains(chapters[index - 1].id)) {
       await _seekAudioQueueToChapter(index - 1, book, chapters[index - 1]);
       return;
     }
@@ -386,6 +397,7 @@ extension _PlayerPlayback on PlayerState {
     Book book,
     Chapter chapter,
   ) async {
+    ++_seekGeneration;
     final start = _startPositionFor(book, chapter);
     _applyingQueueStartSeek = true;
     try {
@@ -401,6 +413,14 @@ extension _PlayerPlayback on PlayerState {
   void _syncChapterFromAudioIndex(int? index) {
     if (!_usingAudioQueue) return;
     if (index == null || index < 0 || index >= chapters.length) return;
+    final previousIndex = _currentChapterIndex;
+    for (var candidate = previousIndex + 1; candidate <= index; candidate++) {
+      if (candidate >= 0 &&
+          _failedQueueChapters.contains(chapters[candidate].id)) {
+        unawaited(_recoverQueueChapter(chapters[candidate]));
+        return;
+      }
+    }
     final nextChapter = chapters[index];
     if (currentChapter?.id == nextChapter.id) return;
     final book = currentBook;
@@ -437,10 +457,102 @@ extension _PlayerPlayback on PlayerState {
     if (duration > minChapterDuration &&
         duration - currentTime <= book.skipOutro) {
       _advancingFromOutro = true;
+      final playGeneration = _playGeneration;
+      final seekGeneration = _seekGeneration;
       Future<void>(() async {
-        await sendProgress();
+        if (!_isActivePlay(playGeneration, chapter.id) ||
+            seekGeneration != _seekGeneration ||
+            !_advancingFromOutro ||
+            !_audio.playing) {
+          return;
+        }
+        // 进度同步不能阻塞切章，原生队列已换章时也不能再多跳一章。
+        unawaited(sendProgress());
         await nextChapter(fromOutro: true);
+      }).catchError((Object failure) {
+        if (!_disposed && playGeneration == _playGeneration) {
+          _handleNativePlaybackError(failure);
+        }
       });
+    }
+  }
+
+  void _handleNativePlaybackError(Object failure) {
+    if (_disposed) return;
+    final details = failure is PlatformException
+        ? failure.details
+        : failure is audio.PlayerException
+            ? failure.details
+            : null;
+    final index = details is Map ? details['index'] : null;
+    if (_audio.audioSource is audio.ConcatenatingAudioSource &&
+        !_usingTranscodeStream &&
+        index is int &&
+        index >= 0 &&
+        index < chapters.length) {
+      final failedChapter = chapters[index];
+      _failedQueueChapters.add(failedChapter.id);
+      // 预加载后续章节失败时，先让当前章节继续播放。
+      if (failedChapter.id != currentChapter?.id) return;
+      if (_suppressPositionUpdates) return;
+      if (_lastRecoveredQueueChapterId != failedChapter.id) {
+        unawaited(_recoverQueueChapter(failedChapter));
+        return;
+      }
+    }
+    if (_suppressPositionUpdates) return;
+    error = ApiError.messageFor(failure);
+    _selectionPending = true;
+    _usingAudioQueue = false;
+    _suppressPositionUpdates = true;
+    ++_playGeneration;
+    _cancelFocusRecovery(clearResume: true);
+    _stopProgressTimers();
+    final generation = _playGeneration;
+    unawaited(_audio.stop().catchError((Object stopFailure) {
+      if (!_disposed && generation == _playGeneration) {
+        error = ApiError.messageFor(stopFailure);
+        _notifyIfActive();
+      }
+    }));
+    _notifyIfActive();
+  }
+
+  Future<void> _recoverQueueChapter(Chapter chapter) async {
+    final book = currentBook;
+    if (book == null || _disposed || _recoveringQueueFailure) return;
+    final resume = isPlaying || _audio.playing;
+    final position = currentChapter?.id == chapter.id
+        ? currentTime
+        : _startPositionFor(book, chapter);
+    var generation = ++_playGeneration;
+    final seekGeneration = _seekGeneration;
+    final focusGeneration = _focusGeneration;
+    _recoveringQueueFailure = true;
+    _lastRecoveredQueueChapterId = chapter.id;
+    _usingAudioQueue = false;
+    _suppressPositionUpdates = true;
+    _advancingFromOutro = false;
+    try {
+      await _audio.stop();
+      if (_disposed || generation != _playGeneration) return;
+      if (seekGeneration != _seekGeneration ||
+          focusGeneration != _focusGeneration) {
+        _selectionPending = true;
+        return;
+      }
+      // 丢弃失败的原生队列，重新加载指定章节；不支持的格式沿用 MP3 转码回退。
+      generation = _playGeneration + 1;
+      await _playChapter(book, List.of(chapters), chapter,
+          startAt: position, autoPlay: resume);
+    } catch (failure) {
+      if (!_disposed && generation == _playGeneration) {
+        error = ApiError.messageFor(failure);
+        _selectionPending = true;
+        _notifyIfActive();
+      }
+    } finally {
+      _recoveringQueueFailure = false;
     }
   }
 }

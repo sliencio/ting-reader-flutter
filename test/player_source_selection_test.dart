@@ -123,6 +123,7 @@ class _NativeAudio {
   bool failFirstLoad = false;
   bool holdPlayback = false;
   bool failSeek = false;
+  bool emitSeeks = false;
   int playCount = 0;
   int pauseCount = 0;
   Future<void>? pauseGate;
@@ -162,6 +163,13 @@ class _NativeAudio {
           if (request.method == 'seek') {
             seeks.add(request.arguments as Map);
             if (failSeek) throw PlatformException(code: 'seek_failed');
+            if (emitSeeks) {
+              final args = request.arguments as Map;
+              emit(
+                  index: args['index'] as int? ?? 0,
+                  position:
+                      Duration(microseconds: args['position'] as int? ?? 0));
+            }
           }
           if (request.method == 'load') {
             final args = request.arguments as Map;
@@ -218,6 +226,14 @@ class _NativeAudio {
           'duration': reportedDuration.inMicroseconds,
           'currentIndex': index,
         }),
+        (_) {});
+  }
+
+  void emitError(int index) {
+    binding.channelBuffers.push(
+        _events!.name,
+        _codec.encodeErrorEnvelope(
+            code: '-11800', message: '音源无法播放', details: {'index': index}),
         (_) {});
   }
 
@@ -972,6 +988,121 @@ void main() {
     await player.playChapter(book, items, second);
     expect(native.sources, hasLength(2));
     expect(native.activeUri.scheme, 'file');
+  });
+
+  test('回归_原生队列自动换章后不能执行上一章等待中的片尾跳转', () async {
+    final outroBook = book.copyWith(skipOutro: 10);
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    final third = chapter('/data/third.mp3', id: 'third', index: 2);
+    await player.playChapter(outroBook, [first, second, third], first,
+        startAt: 620);
+    native.emitSeeks = true;
+    final gate = Completer<void>();
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+    });
+    app.offlineMode = false;
+    app.api.progressGate = gate.future;
+    final progressBefore = app.api.progressUpdates.length;
+    native.emit(position: const Duration(seconds: 630));
+    await waitForPlayback(
+        () => app.api.progressUpdates.length > progressBefore);
+    native.emit(index: 1);
+    await waitForPlayback(() => player.currentChapter?.id == second.id);
+    gate.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    expect(player.currentChapter?.id, second.id);
+    expect(native.seeks.where((item) => item['index'] == 2), isEmpty);
+  });
+
+  test('回归_队列播放结束后一次点击即可重新加载并播放当前章', () async {
+    final item = chapter('/data/first.mp3', id: 'first');
+    await player.playChapter(book, [item], item);
+    final loads = native.sources.length;
+    native.emit(processingState: 4, position: const Duration(seconds: 636));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(player.isPlaying, isFalse);
+    await player.togglePlay();
+    await waitForPlayback(() => player.isPlaying);
+    expect(native.sources.length, greaterThan(loads));
+    expect(native.initialPositions.last, 0);
+  });
+
+  test('回归_下一章预加载失败被原生队列跳过时应恢复该章而非跳到下下章', () async {
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.wma', id: 'second', index: 1);
+    final third = chapter('/data/third.mp3', id: 'third', index: 2);
+    native.unsupportedChapterIds.add(second.id);
+    await player.playChapter(book, [first, second, third], first);
+    native.emitError(1);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(player.currentChapter?.id, first.id);
+    native.emit(index: 2);
+    await waitForPlayback(() =>
+        player.currentChapter?.id == second.id &&
+        native.activeUri.queryParameters['transcode'] == 'mp3');
+    expect(player.isPlaying, isTrue);
+    expect(player.error, isNull);
+  });
+
+  test('回归_手动选择预加载失败的章节必须重建音源不能复用坏队列', () async {
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.wma', id: 'second', index: 1);
+    native.unsupportedChapterIds.add(second.id);
+    final items = [first, second];
+    await player.playChapter(book, items, first);
+    native.emitError(1);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    await player.playChapter(book, items, second);
+    expect(native.sources.length, greaterThan(1));
+    expect(native.activeUri.queryParameters['transcode'], 'mp3');
+    expect(player.isPlaying, isTrue);
+  });
+
+  test('回归_手动下一首遇到预加载失败章节时也应重新加载和转码', () async {
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.wma', id: 'second', index: 1);
+    native.unsupportedChapterIds.add(second.id);
+    await player.playChapter(book, [first, second], first);
+    native.emitError(1);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    await player.nextChapter();
+    expect(player.currentChapter?.id, second.id);
+    expect(native.activeUri.queryParameters['transcode'], 'mp3');
+    expect(player.isPlaying, isTrue);
+  });
+
+  test('回归_正在播放的队列音源失败时保留位置并回退转码', () async {
+    final item = chapter('/data/first.wma', id: 'first');
+    await player.playChapter(book, [item], item, startAt: 42);
+    native.unsupportedChapterIds.add(item.id);
+    native.emitError(0);
+    await waitForPlayback(
+        () => native.activeUri.queryParameters['transcode'] == 'mp3');
+    expect(player.currentChapter?.id, item.id);
+    expect(player.currentTime, closeTo(42, 0.25));
+    expect(native.activeUri.queryParameters['seek'], '42');
+    expect(player.isPlaying, isTrue);
+    expect(player.error, isNull);
+  });
+
+  test('回归_转码音源再次失败时停止重试且用户仍可手动重新播放', () async {
+    final item = chapter('/data/first.wma', id: 'first');
+    native.unsupportedChapterIds.add(item.id);
+    await player.playChapter(book, [item], item, startAt: 42);
+    final loads = native.sources.length;
+    native.emitError(0);
+    await waitForPlayback(() => player.error != null && !player.isPlaying);
+    expect(native.sources.length, loads);
+    await player.togglePlay();
+    await waitForPlayback(() => player.isPlaying);
+    expect(native.sources.length, greaterThan(loads));
+    expect(native.activeUri.queryParameters['transcode'], 'mp3');
+    expect(player.currentTime, closeTo(42, 0.25));
+    expect(native.activeUri.queryParameters['seek'], '42');
+    expect(player.isPlaying, isTrue);
+    expect(player.error, isNull);
   });
 
   test('ordinary native queues still advance without reloading', () async {

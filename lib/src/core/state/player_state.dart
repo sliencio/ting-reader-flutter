@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart' as audio_session;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:flutter/widgets.dart';
 import 'package:just_audio/just_audio.dart' as audio;
 import 'package:just_audio_background/just_audio_background.dart'
@@ -48,7 +49,10 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
       handleAudioSessionActivation: false,
     );
     _positionSub = _audio.positionStream.listen((position) {
-      if (_suppressPositionUpdates) return;
+      if (_suppressPositionUpdates || _applyingQueueStartSeek) return;
+      if (_usingAudioQueue && _audio.currentIndex != _currentChapterIndex) {
+        return;
+      }
       currentTime = _displayTimeForAudioPosition(position);
       if (currentTime > _furthestChapterPosition) {
         _furthestChapterPosition = currentTime;
@@ -100,6 +104,8 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
       }
     });
     _indexSub = _audio.currentIndexStream.listen(_syncChapterFromAudioIndex);
+    _errorSub = _audio.playbackEventStream
+        .listen((_) {}, onError: _handleNativePlaybackError);
     if (!kIsWeb) {
       audio_background.JustAudioBackground.setSeekHandler(
         (position) => seek(position.inMilliseconds / 1000),
@@ -124,6 +130,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<audio.PlayerState>? _completeSub;
   StreamSubscription<int?>? _indexSub;
+  StreamSubscription<audio.PlaybackEvent>? _errorSub;
   StreamSubscription<audio_session.AudioInterruptionEvent>? _interruptionSub;
   StreamSubscription<void>? _noisySub;
   StreamSubscription<audio_session.AudioDevicesChangedEvent>?
@@ -186,6 +193,9 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   bool _usingGatewaySingleChapterSource = false;
   bool _suppressPositionUpdates = false;
   bool _applyingQueueStartSeek = false;
+  final Set<String> _failedQueueChapters = {};
+  bool _recoveringQueueFailure = false;
+  String? _lastRecoveredQueueChapterId;
   ({int play, int seek})? _completedPlaybackOperation;
   bool _gatewayReauthenticationPending = false;
   bool _resumeAfterGatewayReauthentication = false;
@@ -308,9 +318,12 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> playChapter(
-          Book book, List<Chapter> chapterList, Chapter chapter,
-          {double? startAt}) =>
-      _playChapter(book, chapterList, chapter, startAt: startAt);
+      Book book, List<Chapter> chapterList, Chapter chapter,
+      {double? startAt}) {
+    _lastRecoveredQueueChapterId = null;
+    return _playChapter(book, chapterList, chapter, startAt: startAt);
+  }
+
   Future<void> togglePlay() => _togglePlayback();
   Future<void> pause() => _pausePlayback();
   Future<void> seek(double seconds) => _seekPlayback(seconds);
@@ -463,6 +476,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     _playingSub?.cancel();
     _completeSub?.cancel();
     _indexSub?.cancel();
+    _errorSub?.cancel();
     _interruptionSub?.cancel();
     _noisySub?.cancel();
     _devicesChangedSub?.cancel();

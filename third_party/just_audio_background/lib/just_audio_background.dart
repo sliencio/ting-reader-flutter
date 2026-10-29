@@ -211,6 +211,16 @@ class _JustAudioPlayer extends AudioPlayerPlatform {
           _androidAudioSessionId = event['value'] as int?;
           broadcastPlaybackEvent();
           break;
+        case 'playbackError':
+          if (!eventController.isClosed) {
+            eventController.addError(
+                PlatformException(
+                    code: event['errorCode'] as String,
+                    message: event['errorMessage'] as String?,
+                    details: event['errorDetails']),
+                StackTrace.fromString(event['stackTrace'] as String));
+          }
+          break;
       }
     });
     _audioHandler.mediaItem.listen((mediaItem) {
@@ -447,7 +457,18 @@ class _PlayerAudioHandler extends BaseAudioHandler
   Future<void> _init(InitRequest initRequest) async {
     final player = await _platform.init(initRequest);
     _playerCompleter.complete(player);
-    final playbackEventMessageStream = player.playbackEventMessageStream;
+    // 原生预加载错误也要传回应用；在广播前统一处理，避免多个订阅重复报错。
+    final playbackEventMessageStream = player.playbackEventMessageStream
+        .handleError((Object failure, StackTrace stackTrace) {
+      customEvent.add({
+        'type': 'playbackError',
+        'errorCode': failure is PlatformException ? failure.code : '9999999',
+        'errorMessage':
+            failure is PlatformException ? failure.message : failure.toString(),
+        'errorDetails': failure is PlatformException ? failure.details : null,
+        'stackTrace': stackTrace.toString(),
+      });
+    }).asBroadcastStream();
     playbackEventMessageStream.listen((event) {
       final previousIndex = _justAudioEvent.currentIndex;
       final displayPosition = _usesDisplayClock ? _displayPosition : null;

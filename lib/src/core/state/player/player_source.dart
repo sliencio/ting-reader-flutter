@@ -5,6 +5,9 @@ extension _PlayerSources on PlayerState {
   bool _canReuseAudioQueue(Book book, List<Chapter> nextChapters) {
     if (!_usingAudioQueue ||
         _usingTranscodeStream ||
+        error != null ||
+        _audio.processingState == audio.ProcessingState.completed ||
+        _audio.processingState == audio.ProcessingState.idle ||
         !identical(currentBook, book) ||
         _mediaAuthRevision != appState.api.authRevision ||
         chapters.length != nextChapters.length) {
@@ -25,6 +28,7 @@ extension _PlayerSources on PlayerState {
     required String? localPath,
     required double position,
   }) async {
+    if (_failedQueueChapters.contains(chapter.id)) return false;
     final queue = _audio.audioSource;
     if (queue is! audio.ConcatenatingAudioSource ||
         index < 0 ||
