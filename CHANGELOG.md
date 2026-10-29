@@ -25,6 +25,7 @@
 
 ### 构建与发布
 
+- 每次发布使用独立版本号与新标签，保留历史 Release 和附件；手动运行工作流仅构建产物，发布前检查标签与应用版本是否一致。
 - 升级至 Flutter 3.47.0，提供 Android、iOS、Windows、macOS 和 Linux 的本地打包脚本。
 - Windows 提供 EXE 安装包，支持查找自定义安装路径中的 Inno Setup。
 - macOS 与 iOS 的云端构建使用 macOS 26、Xcode 26.6，修复新版本 Swift 依赖在旧工具链下的编译错误。

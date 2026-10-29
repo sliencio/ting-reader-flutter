@@ -21,6 +21,41 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: 检查发布版本
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import subprocess
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          manifest = Path("pubspec.yaml").read_text(encoding="utf-8")
+          match = re.search(r"^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$", manifest, re.MULTILINE)
+          if match is None or tag != f"v{match.group(1)}":
+              raise SystemExit("发布标签必须与 pubspec.yaml 中的新版本号一致，并设置构建号")
+          previous_versions = []
+          tags = subprocess.check_output(["git", "tag", "--list"], text=True).splitlines()
+          for previous_tag in tags:
+              if previous_tag == tag:
+                  continue
+              previous = re.fullmatch(r"v(\d+\.\d+\.\d+)", previous_tag)
+              if previous_tag == "beta":
+                  old_manifest = subprocess.check_output(["git", "show", "beta:pubspec.yaml"], text=True)
+                  previous = re.search(r"^version:\s*(\d+\.\d+\.\d+)", old_manifest, re.MULTILINE)
+              if previous is not None:
+                  previous_versions.append(tuple(map(int, previous.group(1).split("."))))
+          if previous_versions and tuple(map(int, match.group(1).split("."))) <= max(previous_versions):
+              raise SystemExit("发布版本必须高于历史版本，请先递增应用版本号")
+          heading = f"## {match.group(1)} - "
+          lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
+          if not any(line.startswith(heading) for line in lines):
+              raise SystemExit("请先在 CHANGELOG.md 中补充该版本的更新说明")
+          print(f"发布版本检查通过：{tag}，构建号 {match.group(2)}")
+          PY
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -297,7 +332,7 @@ jobs:
     name: Publish GitHub Release
     needs: [android, windows, linux, macos, ios]
     runs-on: ubuntu-latest
-    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
       - uses: actions/checkout@v4
         with:
@@ -309,55 +344,29 @@ jobs:
       - name: 读取发布说明
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
-          RELEASE_EVENT: ${{ github.event_name }}
         run: |
           python3 - <<'PY'
           import os
           from pathlib import Path
 
+          version = os.environ["RELEASE_VERSION"].removeprefix("v")
           lines = Path("CHANGELOG.md").read_text(encoding="utf-8").splitlines()
-          if os.environ["RELEASE_EVENT"] == "workflow_dispatch":
-              heading = "## 未发布"
-              matches = lambda line: line == heading
-          else:
-              version = os.environ["RELEASE_VERSION"].removeprefix("v")
-              heading = f"## {version} - "
-              matches = lambda line: line.startswith(heading)
-          start = next((i for i, line in enumerate(lines) if matches(line)), None)
+          heading = f"## {version} - "
+          start = next((i for i, line in enumerate(lines) if line.startswith(heading)), None)
           if start is None:
-              raise SystemExit(f"Missing changelog: {heading}")
+              raise SystemExit(f"未找到 {version} 的更新说明")
           end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
           notes = "\n".join(lines[start + 1:end]).strip()
           if not notes:
-              raise SystemExit(f"Empty changelog: {heading}")
+              raise SystemExit(f"{version} 的更新说明不能为空")
           Path("release-notes.md").write_text(notes + "\n", encoding="utf-8")
           PY
-      - name: Update Beta Tag
-        if: github.event_name == 'workflow_dispatch'
+      - name: 创建独立版本的 Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git config user.name "github-actions[bot]"
-          git tag -f beta
-          git push origin beta --force
-      - name: Publish Beta Release
-        if: github.event_name == 'workflow_dispatch'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: beta
-          name: Beta Release
-          body_path: release-notes.md
-          prerelease: true
-          make_latest: false
-          overwrite_files: true
-          files: dist/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Publish Formal Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Ting Reader Flutter ${{ github.ref_name }}
-          body_path: release-notes.md
-          files: dist/*
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          gh release create "$RELEASE_TAG" dist/* \
+            --verify-tag \
+            --title "Ting Reader Flutter $RELEASE_TAG" \
+            --notes-file release-notes.md

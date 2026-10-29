@@ -6,7 +6,7 @@
 
 ## 下载
 
-前往本仓库的 [Releases 页面](https://github.com/sliencio/ting-reader-flutter/releases) 下载客户端，也可以直接查看 [Beta 测试版](https://github.com/sliencio/ting-reader-flutter/releases/tag/beta)。
+前往本仓库的 [Releases 页面](https://github.com/sliencio/ting-reader-flutter/releases) 下载客户端，也可以查看[之前发布的 Beta 测试版](https://github.com/sliencio/ting-reader-flutter/releases/tag/beta)。
 
 | 平台 | 文件 | 使用方式 |
 | --- | --- | --- |
@@ -37,7 +37,11 @@ flutter run
 
 各平台的环境要求、打包命令和输出位置见 [本地打包说明](scripts/README.md)。跨平台传输源码时，请保留 `third_party/` 目录。
 
-GitHub Actions 的配置位于 [`.github/workflows/`](.github/workflows/)：手动运行 `Build Releases` 会构建各平台客户端并更新 Beta Release；推送 `v*` 版本标签会构建并发布对应的正式版本。发布说明维护在 `CHANGELOG.md` 中，Beta 读取“未发布”条目，正式版读取对应版本条目。
+GitHub Actions 的配置位于 [`.github/workflows/`](.github/workflows/)：手动运行 `Build Releases` 只构建各平台客户端，成品可在该次运行的 Artifacts 中下载；推送新的 `v版本号` 标签会构建并创建独立的 Release。
+
+每次发布都必须递增 `pubspec.yaml` 的版本号和构建号，并将 `CHANGELOG.md` 中的“未发布”内容整理为对应版本条目。例如 `1.4.5+46` 对应标签 `v1.4.5`，更新日志标题使用 `## 1.4.5 - 发布日期`。提交并推送代码后，再推送这个新标签。工作流会校验版本与标签是否一致，并拒绝不高于历史版本的发布。
+
+历史标签、Release 和附件予以保留。工作流不再移动固定的 `beta` 标签，也不会覆盖已有的 Release；重新发布需要新的版本号和新标签。
 
 ## 来源与致谢
 
