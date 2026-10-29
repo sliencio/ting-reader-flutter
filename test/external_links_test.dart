@@ -15,7 +15,7 @@ void main() {
     );
     expect(
       localizedChangelogUrl('en'),
-      '$tingReaderWebsiteUrl/about/changelog/en',
+      clientReleasesUrl,
     );
     expect(
       localizedServerUpdateGuideUrl('en'),
@@ -23,7 +23,7 @@ void main() {
     );
     expect(
       localizedDownloadPageUrl('en'),
-      '$tingReaderWebsiteUrl/en#download',
+      clientReleasesUrl,
     );
   });
 }

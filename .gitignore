@@ -83,6 +83,8 @@ test/*
 !test/settings_push_layout_test.dart
 !test/listening_tools_test.dart
 !test/session_recovery_test.dart
+!test/client_update_service_test.dart
+!test/about_page_test.dart
 preview_screenshots/
 real_compare_screenshots/
 web_compare_screenshots/

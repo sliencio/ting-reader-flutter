@@ -245,12 +245,6 @@ class _AppShellState extends State<AppShell> {
       ..clear()
       ..clearLiveImages();
     setState(_primaryPages.clear);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        behavior: SnackBarBehavior.floating,
-        margin: EdgeInsets.fromLTRB(
-            16, 0, 16, AppScope.playerOf(context).hasChapter ? 180 : 84),
-        content: Text(context.localeText('缓存已清除，下次打开将从服务端重新加载',
-            'Cache cleared. Pages will reload from the server.'))));
   }
 
   void _openBook(String id) => _openBookAtChapter(id, null);

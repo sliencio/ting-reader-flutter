@@ -1,6 +1,13 @@
 import 'package:url_launcher/url_launcher.dart';
 
 const tingReaderWebsiteUrl = 'https://www.tingreader.cn';
+const clientRepository = 'sliencio/ting-reader-flutter';
+const clientRepositoryUrl = 'https://github.com/$clientRepository';
+const clientReleasesUrl = '$clientRepositoryUrl/releases';
+const clientLatestReleaseApi =
+    'https://api.github.com/repos/$clientRepository/releases/latest';
+const upstreamClientRepositoryUrl =
+    'https://github.com/dqsq2e2/ting-reader-flutter';
 
 String localizedTingReaderWebsiteUrl(String languageCode) {
   return _isEnglish(languageCode)
@@ -17,7 +24,7 @@ String localizedPrivacyPolicyUrl(String languageCode) {
 }
 
 String localizedChangelogUrl(String languageCode) {
-  return _localizedDocumentUrl('/about/changelog', languageCode);
+  return clientReleasesUrl;
 }
 
 String localizedServerUpdateGuideUrl(String languageCode) {
@@ -25,7 +32,7 @@ String localizedServerUpdateGuideUrl(String languageCode) {
 }
 
 String localizedDownloadPageUrl(String languageCode) {
-  return '${localizedTingReaderWebsiteUrl(languageCode)}#download';
+  return clientReleasesUrl;
 }
 
 String _localizedDocumentUrl(String path, String languageCode) {

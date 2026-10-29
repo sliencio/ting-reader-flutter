@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../core/api/api_error.dart';
 import '../../core/models/models.dart';
 import '../../core/services/client_update_service.dart';
-import '../../core/theme/app_theme.dart';
 import '../../core/utils/external_links.dart';
 import '../../core/utils/locale.dart';
 import '../../shared/app_scope.dart';
@@ -14,20 +13,26 @@ class AboutPage extends StatefulWidget {
     super.key,
     required this.backendVersion,
     required this.onBack,
+    this.updateService,
+    this.openLink = openExternalUrl,
   });
 
   final String? backendVersion;
   final VoidCallback onBack;
+  final ClientUpdateService? updateService;
+  final Future<bool> Function(String) openLink;
 
   @override
   State<AboutPage> createState() => _AboutPageState();
 }
 
 class _AboutPageState extends State<AboutPage> {
-  final _clientUpdateService = ClientUpdateService();
-
+  late final _clientUpdateService =
+      widget.updateService ?? ClientUpdateService();
   String? _backendVersion;
-  String _clientVersion = 'Unknown';
+  String? _backendError;
+  String? _clientError;
+  String _clientVersion = '';
   bool _loadingBackend = false;
   bool _checkingBackend = false;
   bool _checkingClient = false;
@@ -49,21 +54,30 @@ class _AboutPageState extends State<AboutPage> {
   @override
   void didUpdateWidget(covariant AboutPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.backendVersion != oldWidget.backendVersion &&
-        (widget.backendVersion ?? '').trim().isNotEmpty) {
+    if ((widget.backendVersion ?? '').trim().isNotEmpty) {
       _backendVersion = widget.backendVersion;
     }
   }
 
+  @override
+  void dispose() {
+    _clientUpdateService.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadBackendVersion() async {
     if (_loadingBackend) return;
-    setState(() => _loadingBackend = true);
+    setState(() {
+      _loadingBackend = true;
+      _backendError = null;
+    });
     try {
       final res = await AppScope.appOf(context).api.get('/api/health');
-      final data = asMap(res.data);
-      if (mounted) {
-        setState(() => _backendVersion = data['version']?.toString());
-      }
+      final version = asMap(res.data)['version']?.toString().trim() ?? '';
+      if (version.isEmpty) throw const FormatException('服务端没有返回版本号');
+      if (mounted) setState(() => _backendVersion = version);
+    } catch (error) {
+      if (mounted) setState(() => _backendError = ApiError.messageFor(error));
     } finally {
       if (mounted) setState(() => _loadingBackend = false);
     }
@@ -74,49 +88,46 @@ class _AboutPageState extends State<AboutPage> {
       final version = await _clientUpdateService.currentVersionLabel();
       if (mounted) setState(() => _clientVersion = version);
     } catch (_) {
-      // Best effort only; the page should still be usable.
+      // 版本读取失败时仍保留项目链接和手动下载入口。
     }
   }
 
   Future<void> _checkBackendUpdate() async {
-    if (_checkingBackend) return;
-    final languageCode = Localizations.localeOf(context).languageCode;
+    if (_checkingBackend || _loadingBackend) return;
+    final language = Localizations.localeOf(context).languageCode;
     setState(() => _checkingBackend = true);
     try {
+      if ((_backendVersion ?? '').isEmpty) await _loadBackendVersion();
+      if (!mounted) return;
+      if ((_backendVersion ?? '').isEmpty) {
+        throw StateError(_backendError ?? '无法获取当前服务端版本');
+      }
       final res =
           await AppScope.appOf(context).api.get('/api/system/check-update');
       final data = asMap(res.data);
-      final remoteVersion = _firstString(data, const ['version']);
-      final currentVersion = _normalizeVersion(_backendVersion ?? '');
-
-      if (remoteVersion.isNotEmpty &&
-          _normalizeVersion(remoteVersion) != currentVersion) {
-        if (!mounted) return;
+      final remote = data['version']?.toString().trim() ?? '';
+      if (remote.isEmpty) throw const FormatException('服务端没有返回更新信息');
+      if (!mounted) return;
+      if (_clientUpdateService.isNewer(remote, _backendVersion!)) {
         final open = await _showUpdateDialog(
           title: context.localeText(
-            '发现服务端新版本 ${_versionLabel(context, remoteVersion)}',
-            'Server update ${_versionLabel(context, remoteVersion)} available',
-          ),
-          date: _firstString(data, const ['date', 'published_at']),
-          actionLabel: context.localeText('前往官网更新', 'Open Guide'),
+              '发现服务端新版本 ${_versionLabel(context, remote)}',
+              'Server update ${_versionLabel(context, remote)} available'),
+          date: (data['date'] ?? data['published_at'])?.toString() ?? '',
+          actionLabel: context.localeText('查看更新指南', 'Update guide'),
         );
-        if (open == true) {
-          await openExternalUrl(
-            localizedServerUpdateGuideUrl(languageCode),
-          );
+        if (mounted && open == true) {
+          await _openLink(localizedServerUpdateGuideUrl(language));
         }
       } else {
-        _showLocalizedSnack(
-          '服务端已是最新版本',
-          'Server is up to date',
-          success: true,
-        );
+        _showSnack(context.localeText('服务端已是最新版本', 'Server is up to date'));
       }
     } catch (error) {
-      _showLocalizedSnack(
-        '检查服务端更新失败: ${ApiError.messageFor(error)}',
-        'Failed to check server update: ${ApiError.messageFor(error)}',
-      );
+      if (mounted) {
+        _showSnack(
+            context.localeText('检查服务端更新失败：', 'Server update check failed: ') +
+                ApiError.messageFor(error));
+      }
     } finally {
       if (mounted) setState(() => _checkingBackend = false);
     }
@@ -124,67 +135,80 @@ class _AboutPageState extends State<AboutPage> {
 
   Future<void> _checkClientUpdate() async {
     if (_checkingClient) return;
-    final languageCode = Localizations.localeOf(context).languageCode;
-    setState(() => _checkingClient = true);
+    setState(() {
+      _checkingClient = true;
+      _clientError = null;
+    });
     try {
       final latest = await _clientUpdateService.fetchLatest();
-      if (latest == null || !latest.hasDownload) {
-        _showLocalizedSnack(
-          '当前平台请前往官网下载客户端',
-          'Download the client from the website for this platform',
-        );
-        await _clientUpdateService.openDownloadPage(languageCode);
-        return;
-      }
-
-      final current = await _clientUpdateService.currentVersion();
-      if (!_clientUpdateService.isNewer(latest.version, current)) {
-        _showLocalizedSnack(
-          '客户端已是最新版本',
-          'Client is up to date',
-          success: true,
-        );
-        return;
-      }
-
       if (!mounted) return;
+      if (latest == null) {
+        setState(() => _clientError = context.localeText(
+            '仓库暂未发布正式版本，可以前往 Releases 查看。',
+            'No stable release is available. You can visit Releases.'));
+        return;
+      }
+      final current = await _clientUpdateService.currentVersion();
+      if (!mounted) return;
+      if (!_clientUpdateService.isNewer(latest.version, current)) {
+        _showSnack(context.localeText('客户端已是最新版本', 'Client is up to date'));
+        return;
+      }
+      final direct =
+          latest.hasDownload && _clientUpdateService.canInstallDirectly;
       final confirm = await _showUpdateDialog(
-        title: context.localeText(
-          '发现客户端新版本 ${_versionLabel(context, latest.version)}',
-          'Client update ${_versionLabel(context, latest.version)} available',
-        ),
+        title: context.localeText('发现客户端新版本 v${latest.version}',
+            'Client update v${latest.version} available'),
         date: latest.date,
-        actionLabel: _clientUpdateService.canInstallDirectly
+        notes: latest.notes,
+        message: latest.hasDownload
+            ? context.localeText(
+                '更新来源：$clientRepository', 'Release source: $clientRepository')
+            : context.localeText('请前往版本页查看安装包与说明。',
+                'Visit the release page for packages and installation notes.'),
+        actionLabel: direct
             ? context.localeText('下载安装', 'Download')
-            : context.localeText('前往浏览器下载', 'Open in Browser'),
+            : context.localeText('查看版本页', 'View release'),
       );
-      if (confirm != true) return;
-
-      if (_clientUpdateService.canInstallDirectly) {
+      if (!mounted || confirm != true) return;
+      if (!direct) {
+        await _openLink(latest.pageUrl);
+        return;
+      }
+      setState(() {
+        _downloadingClient = true;
+        _clientDownloadProgress = 0;
+      });
+      await _clientUpdateService.openOrInstall(latest, onProgress: (progress) {
+        if (mounted) {
+          setState(
+              () => _clientDownloadProgress = progress.clamp(0, 1).toDouble());
+        }
+      });
+    } catch (error) {
+      if (mounted) {
+        setState(() => _clientError = context.localeText(
+                '检查或下载失败，可重试或前往 Releases 手动下载。\n',
+                'Check or download failed. Retry or download from Releases.\n') +
+            ApiError.messageFor(error));
+      }
+    } finally {
+      if (mounted) {
         setState(() {
-          _downloadingClient = true;
-          _clientDownloadProgress = 0;
+          _checkingClient = false;
+          _downloadingClient = false;
         });
       }
-      await _clientUpdateService.openOrInstall(
-        latest,
-        languageCode: languageCode,
-        onProgress: (progress) {
-          if (!mounted) return;
-          setState(() {
-            _clientDownloadProgress = progress.clamp(0, 1).toDouble();
-          });
-        },
-      );
-      if (mounted) setState(() => _downloadingClient = false);
+    }
+  }
+
+  Future<void> _openLink(String url) async {
+    try {
+      if (!await widget.openLink(url) && mounted) {
+        _showSnack(context.localeText('无法打开链接：$url', 'Unable to open: $url'));
+      }
     } catch (error) {
-      if (mounted) setState(() => _downloadingClient = false);
-      _showLocalizedSnack(
-        '检查客户端更新失败: ${ApiError.messageFor(error)}',
-        'Failed to check client update: ${ApiError.messageFor(error)}',
-      );
-    } finally {
-      if (mounted) setState(() => _checkingClient = false);
+      if (mounted) _showSnack(ApiError.messageFor(error));
     }
   }
 
@@ -192,330 +216,177 @@ class _AboutPageState extends State<AboutPage> {
     required String title,
     required String date,
     required String actionLabel,
+    String notes = '',
+    String message = '',
   }) {
-    final releaseDate = _dateOnly(date);
     return showDialog<bool>(
       context: context,
-      builder: (context) {
-        final compact = MediaQuery.sizeOf(context).width < 430;
-        return Dialog(
-          backgroundColor: Colors.transparent,
-          insetPadding: EdgeInsets.symmetric(
-            horizontal: compact ? 22 : 32,
-            vertical: 24,
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 390),
-            child: TingCard(
-              radius: 28,
-              padding: EdgeInsets.symmetric(
-                horizontal: compact ? 24 : 32,
-                vertical: compact ? 30 : 34,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: compact ? 74 : 78,
-                    height: compact ? 74 : 78,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary600.withValues(alpha: 0.14),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Icon(
-                      Icons.check_circle_outline_rounded,
-                      color: AppColors.primary600,
-                      size: 40,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: compact ? 20 : 22,
-                      fontWeight: FontWeight.w700,
-                      height: 1.25,
-                    ),
-                  ),
-                  if (releaseDate.isNotEmpty) ...[
-                    const SizedBox(height: 14),
-                    Text(
-                      context.localeText(
-                        '发布时间：$releaseDate',
-                        'Published: $releaseDate',
-                      ),
-                      style: TextStyle(
-                        color: context.mutedText,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 30),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextButton(
-                          onPressed: () => Navigator.of(context).pop(false),
-                          style: TextButton.styleFrom(
-                            foregroundColor: context.mutedText,
-                            backgroundColor: context.isDark
-                                ? AppColors.slate800
-                                : AppColors.slate100,
-                            minimumSize: const Size.fromHeight(54),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          child: Text(
-                            context.localeText('暂不更新', 'Later'),
-                            maxLines: 1,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => Navigator.of(context).pop(true),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppColors.primary600,
-                            foregroundColor: Colors.white,
-                            minimumSize: const Size.fromHeight(54),
-                            elevation: 12,
-                            shadowColor:
-                                AppColors.primary600.withValues(alpha: 0.28),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                          ),
-                          child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(
-                              actionLabel,
-                              maxLines: 1,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showSnack(String text, {bool success = false}) {
-    if (!mounted) return;
-    final width = MediaQuery.sizeOf(context).width;
-    final isDark = context.isDark;
-    final foreground = isDark ? AppColors.slate50 : AppColors.slate900;
-    final background = isDark ? AppColors.slate800 : Colors.white;
-    final accent = success ? const Color(0xff10b981) : AppColors.primary600;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        content: Row(
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
+        constraints: const BoxConstraints(maxWidth: 520),
+        title: Text(title),
+        content: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: accent.withValues(alpha: isDark ? 0.2 : 0.12),
-                shape: BoxShape.circle,
-              ),
-              alignment: Alignment.center,
-              child: Icon(
-                success ? Icons.check_rounded : Icons.info_outline_rounded,
-                size: 19,
-                color: accent,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                text,
-                style: TextStyle(
-                  color: foreground,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            ),
+            if (date.isNotEmpty) Text(_dateOnly(date)),
+            if (message.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              Text(message),
+            ],
+            if (notes.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              SelectableText(notes),
+            ],
           ],
         ),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: background,
-        elevation: isDark ? 8 : 5,
-        duration: const Duration(seconds: 2),
-        width: width < 440 ? width - 32 : 400,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(
-            color: isDark ? AppColors.slate700 : AppColors.slate200,
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(context.localeText('暂不更新', 'Later')),
           ),
-        ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(actionLabel, textAlign: TextAlign.center),
+          ),
+        ],
       ),
     );
   }
 
-  void _showLocalizedSnack(
-    String zh,
-    String en, {
-    bool success = false,
-  }) {
+  void _showSnack(String text) {
     if (!mounted) return;
-    _showSnack(context.localeText(zh, en), success: success);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(text)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final languageCode = Localizations.localeOf(context).languageCode;
+    final language = Localizations.localeOf(context).languageCode;
     return PageListView(
       onRefresh: _loadBackendVersion,
       children: [
         AppBackButton(onPressed: widget.onBack),
-        const SizedBox(height: 28),
+        const SizedBox(height: 16),
         Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 760),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                PageHeaderRow(
-                  icon: Icons.info_outline_rounded,
-                  title: context.localeText(
-                    '关于 Ting Reader',
-                    'About Ting Reader',
-                  ),
-                  subtitle: context.localeText(
-                    '官方网站、法律协议、更新日志，以及当前服务端和客户端版本。',
-                    'Official website, legal documents, changelog, and current server and client versions.',
-                  ),
-                ),
-                const SizedBox(height: 24),
                 TingCard(
-                  radius: 24,
-                  padding: const EdgeInsets.all(22),
-                  child: Column(
-                    children: [
-                      Image.asset(
-                        'assets/images/logo.png',
-                        width: 78,
-                        height: 78,
-                      ),
-                      const SizedBox(height: 18),
-                      const Text(
-                        'Ting Reader',
+                  child: Column(children: [
+                    Image.asset('assets/images/logo.png',
+                        width: 64, height: 64),
+                    const SizedBox(height: 12),
+                    Text(
+                        context.localeText(
+                            '关于 Ting Reader', 'About Ting Reader'),
                         textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 26,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 22),
-                      _AboutVersionRow(
-                        label: context.localeText('服务端版本', 'Server Version'),
-                        version: _loadingBackend
-                            ? context.localeText('加载中...', 'Loading...')
-                            : _versionLabel(context, _backendVersion ?? ''),
-                        checking: _checkingBackend,
-                        onCheckUpdate: _checkBackendUpdate,
-                      ),
+                        style: Theme.of(context).textTheme.titleLarge),
+                    const SizedBox(height: 8),
+                    Text(
+                      context.localeText('基于开源项目改进的听悦客户端',
+                          'An improved client based on the open source Ting Reader project'),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 20),
+                    _AboutVersionRow(
+                      label: context.localeText('客户端版本', 'Client version'),
+                      version: _clientVersion.isEmpty
+                          ? context.localeText('未知', 'Unknown')
+                          : _clientVersion,
+                      checking: _checkingClient,
+                      onCheckUpdate: _checkClientUpdate,
+                    ),
+                    if (_downloadingClient) ...[
                       const SizedBox(height: 12),
-                      _AboutVersionRow(
-                        label: context.localeText('客户端版本', 'Client Version'),
-                        version: _clientVersion.isEmpty
-                            ? context.localeText('未知', 'Unknown')
-                            : _clientVersion,
-                        checking: _checkingClient,
-                        onCheckUpdate: _checkClientUpdate,
-                      ),
-                      if (_downloadingClient) ...[
-                        const SizedBox(height: 16),
-                        LinearProgressIndicator(
+                      LinearProgressIndicator(
                           value: _clientDownloadProgress <= 0
                               ? null
-                              : _clientDownloadProgress,
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          _clientDownloadProgress <= 0
-                              ? context.localeText(
-                                  '准备下载...',
-                                  'Preparing download...',
-                                )
-                              : '${(_clientDownloadProgress * 100).clamp(0, 100).round()}%',
-                          style:
-                              TextStyle(color: context.mutedText, fontSize: 12),
-                        ),
-                      ],
+                              : _clientDownloadProgress),
+                      const SizedBox(height: 8),
+                      Text(_clientDownloadProgress <= 0
+                          ? context.localeText('准备下载…', 'Preparing download…')
+                          : '${(_clientDownloadProgress * 100).round()}%'),
+                    ],
+                    if (_clientError != null) ...[
+                      const SizedBox(height: 12),
+                      Text(_clientError!,
+                          style: TextStyle(
+                              color: Theme.of(context).colorScheme.error)),
+                      TextButton(
+                        onPressed: () => _openLink(clientReleasesUrl),
+                        child: Text(
+                            context.localeText('前往 Releases', 'Open Releases')),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    _AboutVersionRow(
+                      label: context.localeText('服务端版本', 'Server version'),
+                      version: _loadingBackend
+                          ? context.localeText('加载中…', 'Loading…')
+                          : _versionLabel(context, _backendVersion ?? ''),
+                      checking: _checkingBackend || _loadingBackend,
+                      onCheckUpdate: _checkBackendUpdate,
+                    ),
+                    if (_backendError != null) ...[
+                      const SizedBox(height: 8),
+                      Text(context.localeText('服务端版本暂不可用，下拉重试。',
+                          'Server version unavailable. Pull down to retry.')),
+                    ],
+                  ]),
+                ),
+                const SizedBox(height: 16),
+                TingCard(
+                  child: Column(children: [
+                    _link(
+                        Icons.code_rounded,
+                        context.localeText('项目主页', 'Project repository'),
+                        clientRepository,
+                        clientRepositoryUrl),
+                    _link(
+                        Icons.history_rounded,
+                        context.localeText('更新日志', 'Changelog'),
+                        context.localeText(
+                            '本仓库的版本说明与下载', 'Release notes and downloads'),
+                        localizedChangelogUrl(language)),
+                    _link(
+                        Icons.bug_report_outlined,
+                        context.localeText('问题反馈', 'Report an issue'),
+                        context.localeText(
+                            '在本仓库提交问题', 'Issues in this repository'),
+                        '$clientRepositoryUrl/issues'),
+                    _link(
+                        Icons.description_outlined,
+                        context.localeText('开源许可', 'Open source license'),
+                        'AGPL-3.0',
+                        '$clientRepositoryUrl/blob/main/LICENSE'),
+                  ]),
+                ),
+                const SizedBox(height: 16),
+                TingCard(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(context.localeText('致谢', 'Acknowledgements'),
+                          style: Theme.of(context).textTheme.titleMedium),
+                      const SizedBox(height: 8),
+                      Text(context.localeText(
+                          '本项目基于 dqsq2e2/ting-reader-flutter 改进。感谢原作者和社区贡献者的开源工作。',
+                          'Based on dqsq2e2/ting-reader-flutter. Thanks to the original author and community contributors.')),
+                      _link(
+                          Icons.favorite_outline_rounded,
+                          context.localeText(
+                              '原客户端仓库', 'Original client repository'),
+                          'dqsq2e2/ting-reader-flutter',
+                          upstreamClientRepositoryUrl),
                     ],
                   ),
                 ),
-                const SizedBox(height: 16),
-                _AboutLinksPanel(
-                  links: [
-                    _AboutLink(
-                      icon: Icons.public_rounded,
-                      label: context.localeText('官方网站', 'Official Website'),
-                      value: localizedTingReaderWebsiteUrl(
-                        languageCode,
-                      ),
-                      url: localizedTingReaderWebsiteUrl(
-                        languageCode,
-                      ),
-                      iconColor: Colors.blue.shade600,
-                      iconBackground: Colors.blue.shade50,
-                    ),
-                    _AboutLink(
-                      icon: Icons.description_outlined,
-                      label: context.localeText('用户协议', 'User Agreement'),
-                      value: context.localeText(
-                        '使用许可与免责声明',
-                        'License and disclaimer',
-                      ),
-                      url: localizedUserAgreementUrl(languageCode),
-                      iconColor: Colors.indigo.shade500,
-                      iconBackground: Colors.indigo.shade50,
-                    ),
-                    _AboutLink(
-                      icon: Icons.privacy_tip_outlined,
-                      label: context.localeText('隐私协议', 'Privacy Policy'),
-                      value: context.localeText(
-                        '个人信息与隐私说明',
-                        'Personal information and privacy',
-                      ),
-                      url: localizedPrivacyPolicyUrl(languageCode),
-                      iconColor: Colors.green.shade600,
-                      iconBackground: const Color(0xFFEAFBF3),
-                    ),
-                    _AboutLink(
-                      icon: Icons.history_rounded,
-                      label: context.localeText('更新日志', 'Changelog'),
-                      value: context.localeText(
-                        '版本迭代与修复记录',
-                        'Versions and fixes',
-                      ),
-                      url: localizedChangelogUrl(languageCode),
-                      iconColor: Colors.orange.shade600,
-                      iconBackground: Colors.orange.shade50,
-                    ),
-                  ],
-                ),
+                const SizedBox(height: 24),
               ],
             ),
           ),
@@ -523,125 +394,30 @@ class _AboutPageState extends State<AboutPage> {
       ],
     );
   }
-}
 
-class _AboutLink {
-  const _AboutLink({
-    required this.icon,
-    required this.label,
-    required this.value,
-    required this.url,
-    required this.iconColor,
-    required this.iconBackground,
-  });
-
-  final IconData icon;
-  final String label;
-  final String value;
-  final String url;
-  final Color iconColor;
-  final Color iconBackground;
-}
-
-class _AboutLinksPanel extends StatelessWidget {
-  const _AboutLinksPanel({required this.links});
-
-  final List<_AboutLink> links;
-
-  @override
-  Widget build(BuildContext context) {
-    return TingCard(
-      radius: 20,
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            context.localeText('官方网站', 'Official Website'),
-            style: const TextStyle(
-              color: AppColors.primary600,
-              fontSize: 13,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 16),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final columns = constraints.maxWidth >= 560 ? 2 : 1;
-              final width =
-                  (constraints.maxWidth - (columns - 1) * 16) / columns;
-              return Wrap(
-                spacing: 16,
-                runSpacing: 18,
-                children: [
-                  for (final link in links)
-                    SizedBox(
-                      width: width,
-                      child: _AboutLinkTile(link: link),
-                    ),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _AboutLinkTile extends StatelessWidget {
-  const _AboutLinkTile({required this.link});
-
-  final _AboutLink link;
-
-  @override
-  Widget build(BuildContext context) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(16),
-      onTap: () => openExternalUrl(link.url),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: context.isDark
-                    ? link.iconColor.withValues(alpha: 0.18)
-                    : link.iconBackground,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Icon(link.icon, color: link.iconColor, size: 23),
-            ),
-            const SizedBox(width: 14),
+  Widget _link(IconData icon, String title, String subtitle, String url) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _openLink(url),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          child: Row(children: [
+            Icon(icon, size: 24),
+            const SizedBox(width: 12),
             Expanded(
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    link.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    link.value,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: context.mutedText, fontSize: 13),
-                  ),
-                ],
-              ),
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title,
+                        style: const TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 4),
+                    Text(subtitle,
+                        style: Theme.of(context).textTheme.bodySmall),
+                  ]),
             ),
-            const SizedBox(width: 8),
-            const Icon(
-              Icons.chevron_right_rounded,
-              color: AppColors.slate300,
-              size: 18,
-            ),
-          ],
+          ]),
         ),
       ),
     );
@@ -663,71 +439,31 @@ class _AboutVersionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final compact = MediaQuery.sizeOf(context).width < 430;
-    final labelWidth = compact ? 86.0 : 104.0;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      decoration: BoxDecoration(
-        color: context.isDark ? AppColors.slate800 : AppColors.slate50,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
+    return LayoutBuilder(builder: (context, constraints) {
+      final narrow = constraints.maxWidth < 400 ||
+          MediaQuery.textScalerOf(context).scale(14) > 18;
+      final details = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: labelWidth,
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                color: context.mutedText,
-                fontSize: 14,
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              version,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 15),
-            ),
-          ),
-          const SizedBox(width: 12),
-          TextButton(
-            onPressed: checking ? null : onCheckUpdate,
-            style: TextButton.styleFrom(
-              minimumSize: const Size(72, 36),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-            ),
-            child: Text(
-              checking
-                  ? context.localeText('检查中...', 'Checking')
-                  : context.localeText('检查更新', 'Check'),
-              maxLines: 1,
-            ),
-          ),
+          Text(label, style: Theme.of(context).textTheme.bodySmall),
+          const SizedBox(height: 4),
+          Text(version, style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
-      ),
-    );
+      );
+      final button = TextButton(
+        onPressed: checking ? null : onCheckUpdate,
+        child: Text(checking
+            ? context.localeText('检查中…', 'Checking…')
+            : context.localeText('检查更新', 'Check for updates')),
+      );
+      return narrow
+          ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              details,
+              Align(alignment: Alignment.centerRight, child: button),
+            ])
+          : Row(children: [Expanded(child: details), button]);
+    });
   }
-}
-
-String _firstString(
-  Map<String, dynamic> data,
-  List<String> keys, {
-  String fallback = '',
-}) {
-  for (final key in keys) {
-    final value = data[key];
-    if (value != null && value.toString().trim().isNotEmpty) {
-      return value.toString().trim();
-    }
-  }
-  return fallback;
 }
 
 String _versionLabel(BuildContext context, String raw) {
@@ -738,14 +474,4 @@ String _versionLabel(BuildContext context, String raw) {
   return value.toLowerCase().startsWith('v') ? value : 'v$value';
 }
 
-String _normalizeVersion(String raw) {
-  return raw.trim().replaceFirst(RegExp(r'^[vV]'), '');
-}
-
-String _dateOnly(String raw) {
-  final value = raw.trim();
-  if (value.isEmpty) return '';
-  final parsed = DateTime.tryParse(value);
-  if (parsed == null) return value.split('T').first.replaceAll('-', '/');
-  return '${parsed.year}/${parsed.month}/${parsed.day}';
-}
+String _dateOnly(String raw) => raw.trim().split('T').first;

@@ -18,6 +18,7 @@ import 'package:ting_reader_flutter/src/core/state/player_state.dart';
 import 'package:ting_reader_flutter/src/features/app_shell.dart';
 import 'package:ting_reader_flutter/src/features/bookshelf/bookshelf_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/downloads_page.dart';
+import 'package:ting_reader_flutter/src/features/mine/about_update_dialog.dart';
 import 'package:ting_reader_flutter/src/shared/app_scope.dart';
 
 class _Api extends ApiClient {
@@ -379,10 +380,36 @@ void main() {
     await tester.pumpAndSettle();
     await _select(tester, 'Force refresh');
     expect(app.bookDetailsCache.revision, revision + 1);
+    expect(find.byType(SnackBar), findsNothing);
     await _select(tester, 'Bookshelf');
     expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isFalse);
     expect(tester.takeException(), isNull);
   });
+
+  for (final size in [const Size(320, 568), const Size(1440, 1000)]) {
+    testWidgets('打开关于不刷新或清除缓存，版本加载失败不影响页面 $size', (tester) async {
+      final (app, _) = await _pump(tester, size);
+      final shelf = tester.state(find.byType(BookshelfPage));
+      final revision = app.bookDetailsCache.revision;
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      final settingsRequests =
+          app.client.requests.where((path) => path == '/api/settings').length;
+      for (var i = 0; i < 2; i++) {
+        await _select(tester, 'About Ting Reader');
+        expect(find.byType(AboutPage), findsOneWidget);
+        expect(app.bookDetailsCache.revision, revision);
+        expect(
+            app.client.requests.where((path) => path == '/api/settings').length,
+            settingsRequests);
+        expect(find.byType(SnackBar), findsNothing);
+        await _select(tester, 'Bookshelf');
+        expect(
+            identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
+        expect(tester.takeException(), isNull);
+      }
+    });
+  }
 
   for (final size in [const Size(390, 844), const Size(1440, 1000)]) {
     testWidgets(
