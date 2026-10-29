@@ -220,9 +220,15 @@ jobs:
   macos:
     name: macOS
     needs: [dependencies, quality]
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: 检查 Apple 编译工具链
+        run: |
+          xcodebuild -version
+          xcrun swift --version
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
@@ -250,9 +256,15 @@ jobs:
   ios:
     name: iOS self-sign IPA
     needs: [dependencies, quality]
-    runs-on: macos-14
+    runs-on: macos-15
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_16.4.app/Contents/Developer
     steps:
       - uses: actions/checkout@v4
+      - name: 检查 Apple 编译工具链
+        run: |
+          xcodebuild -version
+          xcrun swift --version
       - uses: subosito/flutter-action@v2
         with:
           flutter-version: ${{ env.FLUTTER_VERSION }}
