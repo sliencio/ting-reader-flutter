@@ -221,64 +221,6 @@ class _MiniTextButton extends StatelessWidget {
   }
 }
 
-class _PlaybackSettingField extends StatelessWidget {
-  const _PlaybackSettingField({
-    required this.controller,
-    required this.icon,
-    required this.label,
-    required this.hint,
-  });
-
-  final TextEditingController controller;
-  final IconData icon;
-  final String label;
-  final String hint;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, size: 15, color: context.mutedText),
-            const SizedBox(width: 7),
-            Text(
-              label,
-              style: TextStyle(
-                color: context.tertiaryText,
-                fontSize: 12,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          keyboardType: TextInputType.number,
-          decoration: InputDecoration(
-            hintText: hint,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            filled: true,
-            fillColor: context.isDark ? AppColors.slate800 : AppColors.slate50,
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide: BorderSide(color: context.faintBorder),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(16),
-              borderSide:
-                  const BorderSide(color: AppColors.primary500, width: 2),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
 class _IconCircle extends StatelessWidget {
   const _IconCircle({
     required this.icon,

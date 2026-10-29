@@ -17,6 +17,7 @@ import '../models/models.dart';
 import '../utils/chapter_sort.dart';
 import '../utils/urls.dart';
 import '../services/playback_resume_store.dart';
+import '../services/playback_skip_store.dart';
 import 'app_state.dart';
 import 'download_state.dart';
 import 'gateway_media_guard.dart';
@@ -175,6 +176,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   final _TranscodeClock _clock = _TranscodeClock();
   bool _disposed = false;
   final _resumeStore = PlaybackResumeStore();
+  final _skipStore = PlaybackSkipStore();
   DateTime _lastResumeSave = DateTime(1970);
   String? _resumeIdentity;
   bool _selectionPending = false;
@@ -219,8 +221,6 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
       }
     },
   );
-  late final BookOperations _bookOperations = BookOperations(appState.api);
-
   Book? currentBook;
   Chapter? currentChapter;
   List<Chapter> chapters = [];
@@ -246,7 +246,8 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
 
   void updateBookMetadata(Book book) {
     if (currentBook?.id != book.id) return;
-    currentBook = book;
+    currentBook =
+        _skipStore.cached(_currentResumeIdentity, book.id)?.apply(book) ?? book;
     notifyListeners();
   }
 
@@ -311,10 +312,23 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   void startSleepTimer(int minutes) => _sleep.minutes(minutes);
   void cancelSleepTimer() => _sleep.cancel();
   Future<void> savePlaybackSettings(Book book, int intro, int outro) async {
-    final saved = await _bookOperations.save(
-        book.id, {'skip_intro': intro, 'skip_outro': outro},
-        original: book);
-    if (!_disposed) updateBookMetadata(saved);
+    final identity = _currentResumeIdentity;
+    final settings = PlaybackSkipSettings(intro, outro);
+    await _skipStore.write(identity, book.id, settings);
+    if (_disposed || identity != _currentResumeIdentity) return;
+    // 只更新正在播放的书，不让设置面板中较旧的书籍信息覆盖新元数据。
+    final active = currentBook;
+    if (active?.id != book.id) return;
+    currentBook = settings.apply(active!);
+    _advancingFromOutro = false;
+    _notifyIfActive();
+    await _saveResumeRecord(includePending: true);
+    _handleSkipOutro();
+  }
+
+  Future<Book> _withLocalSkipSettings(Book book) async {
+    final settings = await _skipStore.read(_currentResumeIdentity, book.id);
+    return settings?.apply(book) ?? book;
   }
 
   Future<void> playChapter(
@@ -384,7 +398,8 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> setVolume(double value) => setPlayerVolume(value);
 
   void replaceCurrentBook(Book book) {
-    currentBook = book;
+    currentBook =
+        _skipStore.cached(_currentResumeIdentity, book.id)?.apply(book) ?? book;
     notifyListeners();
   }
 
@@ -459,7 +474,6 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   void dispose() {
     _disposed = true;
     _sleep.dispose();
-    _bookOperations.dispose();
     _playGeneration++;
     _seekGeneration++;
     if (appState.onGatewayLoginRequired == _pauseForGatewayReauthentication) {

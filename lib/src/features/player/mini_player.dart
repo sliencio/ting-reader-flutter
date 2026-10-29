@@ -18,6 +18,7 @@ import '../../shared/cards/book_card.dart';
 import '../../shared/common/common_widgets.dart';
 import '../../shared/common/media_widgets.dart';
 import '../mine/bookmarks_page.dart';
+import 'playback_settings_dialog.dart';
 
 part 'parts/chapter_sheet.dart';
 part 'parts/collapsed_mini_player.dart';

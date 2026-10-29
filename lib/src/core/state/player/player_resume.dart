@@ -32,7 +32,8 @@ extension _PlayerResume on PlayerState {
         generation == _playGeneration;
     final cached = await _resumeStore.read(identity);
     if (!active()) return;
-    if (cached != null) _selectResumeRecord(cached);
+    if (cached != null) await _selectResumeRecord(cached);
+    if (!active()) return;
     if (appState.offlineMode) return;
     ChapterCatalogue? catalogue;
     try {
@@ -65,7 +66,8 @@ extension _PlayerResume on PlayerState {
           latest.chapterId!,
           latest.position,
           updated ?? DateTime.now());
-      _selectResumeRecord(record);
+      await _selectResumeRecord(record);
+      if (!active()) return;
       await _resumeStore.write(identity, record);
     } catch (_) {
       // 服务端不可达时仍可用本地记录继续收听。
@@ -74,10 +76,18 @@ extension _PlayerResume on PlayerState {
     }
   }
 
-  void _selectResumeRecord(PlaybackResumeRecord record) {
+  Future<void> _selectResumeRecord(PlaybackResumeRecord record) async {
     final chapter = record.chapter;
     if (chapter == null) return;
-    currentBook = record.book;
+    final identity = _currentResumeIdentity;
+    final generation = _playGeneration;
+    final book = await _withLocalSkipSettings(record.book);
+    if (_disposed ||
+        identity != _currentResumeIdentity ||
+        generation != _playGeneration) {
+      return;
+    }
+    currentBook = book;
     chapters = sortChaptersForPlayback(record.chapters);
     currentChapter = chapter;
     duration = chapter.duration.toDouble();

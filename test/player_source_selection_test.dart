@@ -11,6 +11,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ting_reader_flutter/src/core/services/playback_resume_store.dart';
+import 'package:ting_reader_flutter/src/core/services/playback_skip_store.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/models/models.dart';
 import 'package:ting_reader_flutter/src/core/state/app_state.dart';
@@ -998,6 +999,104 @@ void main() {
     expect(native.sources, hasLength(2));
     expect(native.activeUri, localFile.uri);
     expect(native.activeUri.scheme, 'file');
+  });
+
+  test('回归_片头片尾离线保存不修改服务端书籍，刷新元数据也不会覆盖本机设置', () async {
+    player.currentBook = book;
+    await player.savePlaybackSettings(book, 30, 15);
+    expect(app.api.durationUpdates, isEmpty);
+    expect(app.api.progressUpdates, isEmpty);
+    expect(app.api.sessionProbes, isEmpty);
+    final stored = await PlaybackSkipStore().read(resumeIdentity(), book.id);
+    expect(stored?.intro, 30);
+    expect(stored?.outro, 15);
+    player.updateBookMetadata(book.copyWith(title: 'Updated', skipIntro: 999));
+    expect(player.currentBook?.title, 'Updated');
+    expect(player.currentBook?.skipIntro, 30);
+    final item = chapter('/data/chapter.mp3');
+    await player.playChapter(book, [item], item);
+    expect(native.initialPositions.last, 30000000);
+    expect(player.currentBook?.skipOutro, 15);
+  });
+
+  for (final progress in [0.0, 15.0, 75.0]) {
+    test('回归_续播进度 $progress 不落入已设置的片头范围', () async {
+      await player.savePlaybackSettings(book, 30, 15);
+      final item =
+          chapter('/data/chapter.mp3').copyWith(progressPosition: progress);
+      await player.playChapter(book, [item], item);
+      expect(native.initialPositions.last,
+          (progress < 30 ? 30 : progress) * 1000000);
+    });
+  }
+
+  test('回归_启动恢复后首次播放使用本机片头设置', () async {
+    await player.savePlaybackSettings(book, 30, 15);
+    await seedResume(position: 0);
+    await player.restoreLastPlayback();
+    expect(player.currentBook?.skipIntro, 30);
+    await player.togglePlay();
+    expect(native.initialPositions.last, 30000000);
+  });
+
+  test('回归_片头片尾覆盖整章时保留短章节，不立即跳过整章', () async {
+    await player.savePlaybackSettings(book, 30, 15);
+    final first =
+        chapter('/data/first.mp3', id: 'first').copyWith(duration: 20);
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    native.reportedDuration = const Duration(seconds: 20);
+    native.emitSeeks = true;
+    await player.playChapter(book, [first, second], first);
+    expect(native.initialPositions.last, 0);
+    native.emit(position: const Duration(seconds: 10));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+    expect(player.currentChapter?.id, first.id);
+    expect(native.seeks.where((item) => item['index'] == 1), isEmpty);
+  });
+
+  test('回归_暂停时进入片尾不切章，继续播放后只跳到下一章的片头位置', () async {
+    await player.savePlaybackSettings(book, 30, 15);
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    final third = chapter('/data/third.mp3', id: 'third', index: 2);
+    native.emitSeeks = true;
+    await player.playChapter(book, [first, second, third], first);
+    await player.pause();
+    native.emit(position: const Duration(seconds: 625));
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(player.currentChapter?.id, first.id);
+    await player.togglePlay();
+    native.emit(position: const Duration(seconds: 626));
+    await waitForPlayback(() => player.currentChapter?.id == second.id);
+    expect(native.seeks.last['position'], 30000000);
+    expect(native.seeks.where((item) => item['index'] == 2), isEmpty);
+  });
+
+  test('回归_原生自动换章后延后跳片头，不能重入播放器通知或重复跳转', () async {
+    await player.savePlaybackSettings(book, 30, 0);
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    native.emitSeeks = true;
+    await player.playChapter(book, [first, second], first);
+    native.emit(index: 1);
+    await waitForPlayback(() =>
+        player.currentChapter?.id == second.id && native.seeks.isNotEmpty);
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(native.seeks.where((item) => item['index'] == 1), hasLength(1));
+    expect(native.seeks.last['position'], 30000000);
+    expect(player.error, isNull);
+  });
+
+  test('回归_有效片头片尾不因额外十秒门槛失效', () async {
+    await player.savePlaybackSettings(book, 30, 10);
+    final first =
+        chapter('/data/first.mp3', id: 'first').copyWith(duration: 45);
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    native.reportedDuration = const Duration(seconds: 45);
+    native.emitSeeks = true;
+    await player.playChapter(book, [first, second], first);
+    native.emit(position: const Duration(seconds: 36));
+    await waitForPlayback(() => player.currentChapter?.id == second.id);
   });
 
   test('回归_原生队列自动换章后不能执行上一章等待中的片尾跳转', () async {

@@ -61,8 +61,6 @@ Future<EditBookDialogResult?> showBookEditorDialog(
   final genre = TextEditingController(text: book.genre ?? '');
   final year = TextEditingController(text: book.year?.toString() ?? '');
   final cover = TextEditingController(text: book.coverUrl ?? '');
-  final skipIntro = TextEditingController(text: book.skipIntro.toString());
-  final skipOutro = TextEditingController(text: book.skipOutro.toString());
   final chapterRegex = TextEditingController(text: book.chapterRegex ?? '');
   final description = TextEditingController(text: book.description ?? '');
   final genFilename = TextEditingController();
@@ -102,8 +100,6 @@ Future<EditBookDialogResult?> showBookEditorDialog(
                 'genre': genre.text.trim(),
                 'year': int.tryParse(year.text.trim()),
                 'cover_url': cover.text.trim(),
-                'skip_intro': int.tryParse(skipIntro.text.trim()) ?? 0,
-                'skip_outro': int.tryParse(skipOutro.text.trim()) ?? 0,
                 'chapter_regex': chapterRegex.text.trim(),
                 'description': description.text.trim(),
                 'manual_corrected': metadataLockTouched ? metadataLocked : true,
@@ -583,26 +579,6 @@ Future<EditBookDialogResult?> showBookEditorDialog(
                         mono: true,
                       ),
                       const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _EditMetadataField(
-                              controller: skipIntro,
-                              label: context.l10n.bookDetailSkipIntroField,
-                              number: true,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: _EditMetadataField(
-                              controller: skipOutro,
-                              label: context.l10n.bookDetailSkipOutroField,
-                              number: true,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
                       _ChapterGroupOrderSelector(
                         value: selectedGroupOrder,
                         onChanged: disabled
@@ -858,8 +834,6 @@ Future<EditBookDialogResult?> showBookEditorDialog(
     genre,
     year,
     cover,
-    skipIntro,
-    skipOutro,
     chapterRegex,
     description,
     genFilename,

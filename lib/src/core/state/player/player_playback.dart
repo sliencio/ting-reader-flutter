@@ -33,6 +33,8 @@ extension _PlayerPlayback on PlayerState {
     _suppressAutoPlay = false;
     await applySettings(appState.settings);
     if (_disposed || playGeneration != _playGeneration) return;
+    book = await _withLocalSkipSettings(book);
+    if (_disposed || playGeneration != _playGeneration) return;
     var nextChapters = sortChaptersForPlayback(chapterList);
     if (nextChapters.every((item) => item.id != chapter.id)) {
       nextChapters = sortChaptersForPlayback([...nextChapters, chapter]);
@@ -187,8 +189,11 @@ extension _PlayerPlayback on PlayerState {
             (_audio.processingState == audio.ProcessingState.completed ||
                 _audio.processingState == audio.ProcessingState.idle))) {
       final atEnd = _audio.processingState == audio.ProcessingState.completed;
+      final intro = _introPositionFor(currentBook!, currentChapter!);
       await playChapter(currentBook!, chapters, currentChapter!,
-          startAt: atEnd ? currentBook!.skipIntro.toDouble() : currentTime);
+          startAt: atEnd || (_selectionPending && currentTime < intro)
+              ? intro
+              : currentTime);
       return;
     }
     if (_gatewayReauthenticationPending) {
@@ -383,11 +388,24 @@ extension _PlayerPlayback on PlayerState {
   }
 
   double _startPositionFor(Book book, Chapter chapter) {
+    final intro = _introPositionFor(book, chapter);
     final progress = chapter.progressPosition;
     if (progress != null &&
+        progress.isFinite &&
+        progress > intro &&
         chapter.duration > 0 &&
         progress / chapter.duration < 0.95) {
       return progress;
+    }
+    return intro;
+  }
+
+  double _introPositionFor(Book book, Chapter chapter) {
+    if (book.skipIntro <= 0) return 0;
+    // 设置覆盖整章时不跳过，避免短章节直接结束或被连续跳过。
+    if (chapter.duration > 0 &&
+        chapter.duration <= book.skipIntro + book.skipOutro) {
+      return 0;
     }
     return book.skipIntro.toDouble();
   }
@@ -443,7 +461,22 @@ extension _PlayerPlayback on PlayerState {
       return;
     }
     if (!_applyingQueueStartSeek && startPosition > 0 && book != null) {
-      unawaited(_seekAudioQueueToChapter(index, book, nextChapter));
+      final playGeneration = _playGeneration;
+      final seekGeneration = _seekGeneration;
+      // 原生章节通知内不能同步 seek，否则会重入 just_audio 的事件流。
+      Future<void>(() async {
+        if (!_isActivePlay(playGeneration, nextChapter.id) ||
+            seekGeneration != _seekGeneration ||
+            _audio.currentIndex != index ||
+            _audio.position.inMilliseconds / 1000 >= startPosition) {
+          return;
+        }
+        await _seekAudioQueueToChapter(index, book, nextChapter);
+      }).catchError((Object failure) {
+        if (_isActivePlay(playGeneration, nextChapter.id)) {
+          _handleNativePlaybackError(failure);
+        }
+      });
     }
     _startProgressTimer();
   }
@@ -451,9 +484,15 @@ extension _PlayerPlayback on PlayerState {
   void _handleSkipOutro() {
     final book = currentBook;
     final chapter = currentChapter;
-    if (book == null || chapter == null || _advancingFromOutro) return;
+    if (book == null ||
+        chapter == null ||
+        _advancingFromOutro ||
+        _suppressPositionUpdates ||
+        !_audio.playing) {
+      return;
+    }
     if (book.skipOutro <= 0 || duration <= 0) return;
-    final minChapterDuration = book.skipIntro + book.skipOutro + 10;
+    final minChapterDuration = book.skipIntro + book.skipOutro;
     if (duration > minChapterDuration &&
         duration - currentTime <= book.skipOutro) {
       _advancingFromOutro = true;
@@ -462,8 +501,16 @@ extension _PlayerPlayback on PlayerState {
       Future<void>(() async {
         if (!_isActivePlay(playGeneration, chapter.id) ||
             seekGeneration != _seekGeneration ||
-            !_advancingFromOutro ||
-            !_audio.playing) {
+            !_advancingFromOutro) {
+          return;
+        }
+        final activeBook = currentBook;
+        if (!_audio.playing ||
+            activeBook == null ||
+            activeBook.skipOutro <= 0 ||
+            duration <= activeBook.skipIntro + activeBook.skipOutro ||
+            duration - currentTime > activeBook.skipOutro) {
+          _advancingFromOutro = false;
           return;
         }
         // 进度同步不能阻塞切章，原生队列已换章时也不能再多跳一章。
