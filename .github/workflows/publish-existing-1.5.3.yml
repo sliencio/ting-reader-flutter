@@ -34,7 +34,7 @@ jobs:
           assert run['path'] == '.github/workflows/release.yml'
           assert run['status'] == 'completed' and run['conclusion'] == 'success'
           PY
-          gh release view v1.5.3 --json body,title > /tmp/release-before.json
+          gh release view v1.5.3 --json body,name > /tmp/release-before.json
       - uses: actions/download-artifact@v4
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -47,5 +47,5 @@ jobs:
             test -s "dist/$file"
           done
           gh release upload v1.5.3 dist/* --clobber
-          gh release view v1.5.3 --json body,title > /tmp/release-after.json
+          gh release view v1.5.3 --json body,name > /tmp/release-after.json
           cmp /tmp/release-before.json /tmp/release-after.json
