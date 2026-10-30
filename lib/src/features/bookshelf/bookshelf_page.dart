@@ -8,6 +8,7 @@ import '../../core/state/books_state.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/locale.dart';
 import '../../shared/app_scope.dart';
+import '../../shared/server_refresh_binding.dart';
 import '../../shared/cards/book_card.dart';
 import '../../shared/common/common_widgets.dart';
 import '../../shared/filter/display_filter_menu.dart';
@@ -38,6 +39,12 @@ class _BookshelfPageState extends State<BookshelfPage> {
   static const int _pageSize = 50;
 
   BookshelfState? _shelf;
+  late final _serverRefresh = ServerRefreshBinding(
+    visible: () => mounted && TickerMode.valuesOf(context).enabled,
+    refresh: () async {
+      await _shelf?.load(background: true);
+    },
+  );
   bool get _loading => _shelf?.loading ?? true;
   List<Book> get _books => _shelf?.books ?? const [];
   List<Series> get _series => _shelf?.series ?? const [];
@@ -82,6 +89,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
 
   @override
   void dispose() {
+    _serverRefresh.dispose();
     _shelf?.removeListener(_shelfChanged);
     _shelf?.dispose();
     _indexOverlayTimer?.cancel();
@@ -112,6 +120,8 @@ class _BookshelfPageState extends State<BookshelfPage> {
     if (!TickerMode.valuesOf(context).enabled) _closeFilterMenu();
     _shelf ??= BookshelfState(AppScope.appOf(context).api)
       ..addListener(_shelfChanged);
+    _serverRefresh.bind(AppScope.appOf(context).serverChanges);
+    _serverRefresh.resume();
   }
 
   void _shelfChanged() {

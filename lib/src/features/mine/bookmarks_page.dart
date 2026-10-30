@@ -8,6 +8,7 @@ import '../../core/models/_helpers.dart' show readDouble, readInt, readString;
 import '../../core/theme/app_theme.dart';
 import '../../core/utils/locale.dart';
 import '../../shared/app_scope.dart';
+import '../../shared/server_refresh_binding.dart';
 import '../../shared/cards/book_card.dart';
 import '../../shared/common/common_widgets.dart';
 import '../../shared/dialogs/text_input_dialog.dart';
@@ -29,6 +30,24 @@ class _BookmarksPageState extends State<BookmarksPage> {
   String? _error;
   int _page = 1;
   int _total = 0;
+  int _loadRevision = 0;
+  late final _serverRefresh = ServerRefreshBinding(
+    visible: () => mounted && TickerMode.valuesOf(context).enabled,
+    refresh: () => _load(_page, background: true),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _serverRefresh.bind(AppScope.appOf(context).serverChanges);
+    _serverRefresh.resume();
+  }
+
+  @override
+  void dispose() {
+    _serverRefresh.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -38,10 +57,11 @@ class _BookmarksPageState extends State<BookmarksPage> {
     });
   }
 
-  Future<void> _load(int page) async {
+  Future<void> _load(int page, {bool background = false}) async {
     if (!mounted) return;
+    final revision = ++_loadRevision;
     setState(() {
-      _loading = true;
+      if (!background) _loading = true;
       _error = null;
     });
     try {
@@ -49,18 +69,22 @@ class _BookmarksPageState extends State<BookmarksPage> {
         '/api/bookmarks/books',
         params: {'page': page, 'page_size': _pageSize},
       );
-      if (!mounted) return;
+      if (!mounted || revision != _loadRevision) return;
       final data = asMap(response.data);
       setState(() {
         _books = asMapList(data['items']);
         _total = readInt(data, 'total') ?? 0;
         _page = page;
-        _expanded.clear();
+        if (!background) _expanded.clear();
       });
     } catch (error) {
-      if (mounted) setState(() => _error = ApiError.messageFor(error));
+      if (mounted && revision == _loadRevision) {
+        setState(() => _error = ApiError.messageFor(error));
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && revision == _loadRevision) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -201,6 +225,17 @@ class _BookBookmarkPanelState extends State<BookBookmarkPanel> {
   int _page = 1;
   int _total = 0;
   int _loadRevision = 0;
+  late final _serverRefresh = ServerRefreshBinding(
+    visible: () => mounted && TickerMode.valuesOf(context).enabled,
+    refresh: () => _load(_page, background: true),
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _serverRefresh.bind(AppScope.appOf(context).serverChanges);
+    _serverRefresh.resume();
+  }
 
   @override
   void initState() {
@@ -222,15 +257,16 @@ class _BookBookmarkPanelState extends State<BookBookmarkPanel> {
 
   @override
   void dispose() {
+    _serverRefresh.dispose();
     _noteController.dispose();
     super.dispose();
   }
 
-  Future<void> _load(int page) async {
+  Future<void> _load(int page, {bool background = false}) async {
     if (!mounted) return;
     final revision = ++_loadRevision;
     setState(() {
-      _loading = true;
+      if (!background) _loading = true;
       _error = null;
     });
     try {

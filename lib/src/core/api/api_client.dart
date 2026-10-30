@@ -130,6 +130,14 @@ class ApiClient {
     );
   }
 
+  Future<Response<dynamic>> getBytes(String path, {CancelToken? cancelToken}) =>
+      _send(
+        () => _dio.get<dynamic>(path,
+            options: _authOptions().copyWith(responseType: ResponseType.bytes),
+            cancelToken: cancelToken),
+        cancelToken: cancelToken,
+      );
+
   /// Fetch a text asset from an absolute URL with the same credentials as API
   /// requests. Plugin UI HTML is an API asset, not an SPA fallback, so callers
   /// need a plain-text response and must not rely on the WebView's document

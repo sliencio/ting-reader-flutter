@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -55,6 +56,9 @@ class ListeningProgressSync extends ChangeNotifier {
   Future<void>? _flushing;
   bool _disposed = false;
   String? error;
+  String? _deviceId;
+  bool versioned(String book) =>
+      _acknowledged[identity()]?[book]?.revision != null;
   bool get syncing => _flushing != null;
   int get pendingCount => _pending[identity()]?.length ?? 0;
   Map<String, ProgressItem> get conflicts =>
@@ -71,6 +75,12 @@ class ListeningProgressSync extends ChangeNotifier {
   Future<void> _load(String owner) async {
     if (_pending.containsKey(owner)) return;
     final prefs = await SharedPreferences.getInstance();
+    _deviceId ??= prefs.getString('listening_device_id');
+    if (_deviceId == null) {
+      _deviceId = base64Url
+          .encode(List.generate(24, (_) => Random.secure().nextInt(256)));
+      await prefs.setString('listening_device_id', _deviceId!);
+    }
     final items = <String, PendingListeningProgress>{};
     final ack = <String, ProgressItem>{};
     try {
@@ -111,6 +121,7 @@ class ListeningProgressSync extends ChangeNotifier {
                     'position': item.position,
                     'duration': item.duration,
                     'updated_at': item.updatedAt,
+                    'revision': item.revision,
                   })
               .toList(),
         }));
@@ -127,12 +138,31 @@ class ListeningProgressSync extends ChangeNotifier {
 
   Future<void> initialize() => _serialize(() => _load(identity()));
 
-  Future<void> observeRemote(Map<String, dynamic> data) {
+  Future<void> observeRemote(Map<String, dynamic> data,
+      {bool Function()? applyRemote}) {
     final owner = identity();
     final remote = ProgressItem.fromJson(data);
     return _serialize(() async {
       await _load(owner);
+      if (_disposed || owner != identity()) return;
+      final acknowledged = _acknowledged[owner]![remote.bookId];
+      if (remote.revision != null &&
+          acknowledged?.revision != null &&
+          remote.revision! < acknowledged!.revision!) {
+        return;
+      }
       final pending = _pending[owner]![remote.bookId];
+      if (data['device_id'] == _deviceId) {
+        _acknowledged[owner]![remote.bookId] = remote;
+        if (pending != null &&
+            remote.chapterId == pending.chapterId &&
+            (remote.position - pending.position).abs() < 1) {
+          _pending[owner]!.remove(remote.bookId);
+        }
+        await _persist(owner);
+        _notify();
+        return;
+      }
       if (_conflicts[owner]?.containsKey(remote.bookId) ?? false) return;
       if (pending != null && _remoteConflicts(owner, pending, remote)) {
         _conflicts.putIfAbsent(owner, () => {})[remote.bookId] = remote;
@@ -146,6 +176,10 @@ class ListeningProgressSync extends ChangeNotifier {
         _pending[owner]!.remove(remote.bookId);
         await _persist(owner);
         _notify();
+        applyRemote?.call();
+      } else if (pending == null && (applyRemote?.call() ?? false)) {
+        _acknowledged[owner]![remote.bookId] = remote;
+        await _persist(owner);
       }
     });
   }
@@ -164,6 +198,10 @@ class ListeningProgressSync extends ChangeNotifier {
         _conflicts.putIfAbsent(owner, () => {})[bookId] = remote;
         _notify();
         return false;
+      }
+      if (remote != null && !_acknowledged[owner]!.containsKey(bookId)) {
+        _acknowledged[owner]![bookId] = remote;
+        await _persist(owner);
       }
       return !conflicts.containsKey(bookId);
     } catch (failure) {
@@ -209,6 +247,7 @@ class ListeningProgressSync extends ChangeNotifier {
 
   bool _same(ProgressItem? a, ProgressItem b) =>
       a != null &&
+      (a.revision == null || b.revision == null || a.revision == b.revision) &&
       a.chapterId == b.chapterId &&
       (a.position - b.position).abs() < 1 &&
       (a.updatedAt == b.updatedAt ||
@@ -227,6 +266,10 @@ class ListeningProgressSync extends ChangeNotifier {
       return false;
     }
     if (_same(_acknowledged[owner]![value.bookId], remote)) return false;
+    final acknowledged = _acknowledged[owner]![value.bookId];
+    if (acknowledged?.revision != null && remote.revision != null) {
+      return acknowledged!.revision != remote.revision;
+    }
     final remoteAt = DateTime.tryParse(remote.updatedAt ?? '');
     return remoteAt != null &&
         remoteAt.isAfter((value.unsyncedSince ?? value.updatedAt)
@@ -273,7 +316,10 @@ class ListeningProgressSync extends ChangeNotifier {
           'chapter_id': value.chapterId,
           'position': value.position,
           'duration': value.duration,
+          if (remote?.revision != null) 'base_revision': remote!.revision,
+          if (remote?.revision != null) 'device_id': _deviceId,
         });
+        if (!active()) return;
         final ackData = asMap(response.data);
         final accepted = ProgressItem.fromJson(
             ackData['book_id'] != null ? ackData : value.toJson());
@@ -287,6 +333,17 @@ class ListeningProgressSync extends ChangeNotifier {
         error = null;
         _notify();
       } catch (failure) {
+        if (!active()) return;
+        if (failure is DioException && failure.response?.statusCode == 409) {
+          final current = asMap(asMap(failure.response?.data)['current']);
+          if (current['book_id'] == value.bookId) {
+            _conflicts.putIfAbsent(owner, () => {})[value.bookId] =
+                ProgressItem.fromJson(current);
+            error = '其他设备已更新进度，请选择续播位置';
+            _notify();
+            continue;
+          }
+        }
         error = failure.toString();
         _notify();
         return;
@@ -312,10 +369,13 @@ class ListeningProgressSync extends ChangeNotifier {
       _notify();
       return remote;
     }
-    // 用户明确选择本机进度后，重新以当前时刻作为这次修改的时间。
+    final latest = canSync() ? await _remote(bookId) : null;
+    if (_disposed || owner != identity()) return null;
+    // 明确选择本机后，以刚读取的远端版本为基线；并发更新仍由服务端拒绝。
     await _serialize(() async {
       await _load(owner);
       final current = _pending[owner]![bookId];
+      if (latest != null) _acknowledged[owner]![bookId] = latest;
       if (current != null) {
         _pending[owner]![bookId] = PendingListeningProgress(
             bookId: current.bookId,

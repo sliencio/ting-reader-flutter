@@ -45,6 +45,55 @@ bool _isFnosGatewayModeValue(Object? value) {
 
 class AppState extends ChangeNotifier {
   final bookDetailsCache = BookDetailsCache();
+  final serverChanges = ValueNotifier<int>(0);
+  Map<String, dynamic>? _serverVersion;
+  String? _serverVersionOwner;
+  Future<void>? _checkingServerChanges;
+
+  void observeServerChanges(Map<String, dynamic> value) {
+    if (_disposed ||
+        value['content_revision'] is! num ||
+        value['instance'] is! String) {
+      return;
+    }
+    final owner = _sessionIdentity;
+    final previous = _serverVersionOwner == owner ? _serverVersion : null;
+    _serverVersionOwner = owner;
+    _serverVersion = value;
+    if (previous != null &&
+        ['instance', 'content_revision', 'reading_revision']
+            .any((key) => previous[key] != value[key])) {
+      if (previous['instance'] != value['instance'] ||
+          previous['content_revision'] != value['content_revision']) {
+        PaintingBinding.instance.imageCache
+          ..clear()
+          ..clearLiveImages();
+      }
+      serverChanges.value++;
+    }
+  }
+
+  Future<void> checkServerChanges({CancelToken? cancelToken}) {
+    if (_disposed || offlineMode || token == null || user == null) {
+      return Future.value();
+    }
+    return _checkingServerChanges ??= _checkServerChanges(cancelToken)
+        .whenComplete(() => _checkingServerChanges = null);
+  }
+
+  Future<void> _checkServerChanges(CancelToken? cancellation) async {
+    final owner = _sessionIdentity;
+    try {
+      final response =
+          await api.get('/api/sync/state', cancelToken: cancellation);
+      if (!_disposed && owner == _sessionIdentity) {
+        observeServerChanges(asMap(response.data));
+      }
+    } catch (_) {
+      // 断网和旧服务端不会使已有缓存及登录状态失效。
+    }
+  }
+
   AppState({FnConnectClient? fnConnect, FlutterSecureStorage? secureStorage})
       : _ownsFnConnect = fnConnect == null,
         fnConnect = fnConnect ?? FnConnectClient(),
@@ -119,6 +168,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    serverChanges.dispose();
     chapterReadSync.dispose();
     _cancelDirectSessionRecovery();
     _sessionMonitor.dispose();
@@ -161,6 +211,7 @@ class AppState extends ChangeNotifier {
         user != null,
     check: (cancel) async {
       await api.get('/api/me', cancelToken: cancel);
+      await checkServerChanges(cancelToken: cancel);
     },
   );
   Future<void> Function()? onGatewayLoginRequired;

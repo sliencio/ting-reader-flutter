@@ -45,7 +45,7 @@ class _PlayerProgress {
   final _ProgressSnapshot? Function() snapshot;
   final bool Function() suspended;
   final bool Function() needsHttpFallback;
-  final void Function(String? bookId, String? chapterId, double position)
+  final bool Function(String? bookId, String? chapterId, double position)
       onRemotePosition;
   WebSocket? _socket;
   StreamSubscription<dynamic>? _subscription;
@@ -79,7 +79,7 @@ class _PlayerProgress {
     if (value != null) {
       await record(value);
       if (!journal.conflicts.containsKey(value.book.id)) {
-        await _sendWebSocket(value);
+        if (!await _sendWebSocket(value)) await _sendHttp(value);
       }
     }
   }
@@ -116,6 +116,7 @@ class _PlayerProgress {
         }
         _validatedBooks.add(value.book.id);
       }
+      if (journal.versioned(value.book.id)) return false;
       if (_blocked ||
           journal.syncing ||
           owner != journal.identity() ||
@@ -247,6 +248,10 @@ class _PlayerProgress {
         return;
       }
       if (data is! Map) return;
+      if (data['type'] == 'server_changed') {
+        appState.observeServerChanges(asMap(data['state']));
+        return;
+      }
       if (data['type'] == 'pong') {
         _heartbeat?.pong();
         return;
@@ -254,10 +259,13 @@ class _PlayerProgress {
       if (data['type'] != 'progress_updated') return;
       final position = _doubleValue(data['position']);
       if (position == null || !position.isFinite) return;
-      unawaited(journal.observeRemote(Map<String, dynamic>.from(data)));
-      if (journal.hasPending(data['book_id']?.toString() ?? '')) return;
-      onRemotePosition(data['book_id']?.toString(),
-          data['chapter_id']?.toString(), position);
+      final generation = _generation;
+      unawaited(journal.observeRemote(Map<String, dynamic>.from(data),
+          applyRemote: () =>
+              !_blocked &&
+              generation == _generation &&
+              onRemotePosition(data['book_id']?.toString(),
+                  data['chapter_id']?.toString(), position)));
     } catch (_) {
       // Malformed realtime packets must not affect playback.
     }

@@ -14,6 +14,7 @@ import 'mine/favorites_page.dart';
 import 'mine/fn_connect_page.dart';
 import 'mine/mine_page.dart';
 import 'mine/listening_settings_page.dart';
+import 'mine/server_maintenance_page.dart';
 import 'mine/history_page.dart';
 import 'mine/bookmarks_page.dart';
 import 'mine/personalization/personalization_page.dart';
@@ -633,6 +634,8 @@ class _AppShellState extends State<AppShell> {
         return NotificationSettingsPage(onBack: () => _go(AppDestination.mine));
       case AppDestination.statistics:
         return AdminStatisticsPage(onBack: () => _go(AppDestination.mine));
+      case AppDestination.maintenance:
+        return const ServerMaintenancePage();
       case AppDestination.downloads:
         return const DownloadsPage();
       case AppDestination.about:

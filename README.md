@@ -43,6 +43,8 @@ GitHub Actions 的配置位于 [`.github/workflows/`](.github/workflows/)：手�
 
 历史标签、Release 和附件予以保留。工作流不再移动固定的 `beta` 标签，也不会覆盖已有的 Release；重新发布需要新的版本号和新标签。
 
+日常更新默认只递增补丁版本和构建号，例如 `1.5.0+50` 的下次发布使用 `1.5.1+51`；重大版本调整另行确认。每次 Release 说明仅整理上个版本之后的新改动。
+
 ## 来源与致谢
 
 - 原客户端仓库：[dqsq2e2/ting-reader-flutter](https://github.com/dqsq2e2/ting-reader-flutter)

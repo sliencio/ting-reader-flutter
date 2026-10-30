@@ -273,7 +273,8 @@ typedef _BookDetailSnapshot = ({
   String tab,
   int group,
   bool ascending,
-  bool groupsDescending
+  bool groupsDescending,
+  Map<String, dynamic>? serverRevision
 });
 
 class BookDetailsCache {
@@ -315,6 +316,7 @@ class BookDetailsCache {
       group: saved.group,
       ascending: saved.ascending,
       groupsDescending: saved.groupsDescending,
+      serverRevision: saved.serverRevision,
     ));
   }
 }
@@ -338,6 +340,7 @@ class BookDetailState extends ChangeNotifier {
     group = saved.group;
     ascending = saved.ascending;
     groupsDescending = saved.groupsDescending;
+    _serverRevision = saved.serverRevision;
     groupOrders = readChapterGroupOrders(settings);
     loading = false;
   }
@@ -368,6 +371,7 @@ class BookDetailState extends ChangeNotifier {
   static const pageSize = 100;
   int _pageRevision = 0;
   bool _favoritePending = false;
+  Map<String, dynamic>? _serverRevision;
 
   void _notify() {
     if (_disposed) return;
@@ -388,18 +392,18 @@ class BookDetailState extends ChangeNotifier {
         tab: tab,
         group: group,
         ascending: ascending,
-        groupsDescending: groupsDescending
+        groupsDescending: groupsDescending,
+        serverRevision: _serverRevision,
       ));
     }
     notifyListeners();
   }
 
-  Future<void> load({String? initialChapter}) async {
+  Future<void> load({String? initialChapter, bool force = false}) async {
     if (_disposed) return;
     _loadToken?.cancel('Book details reloaded');
     _pageRevision++;
     pageLoading = false;
-    catalogue.invalidate();
     final token = CancelToken();
     _loadToken = token;
     final hadContent = book != null;
@@ -407,6 +411,34 @@ class BookDetailState extends ChangeNotifier {
     error = null;
     _notify();
     try {
+      Map<String, dynamic>? serverRevision;
+      try {
+        final response = await api.get(
+            '/api/books/${Uri.encodeComponent(bookId)}/revision',
+            cancelToken: token);
+        final value = asMap(response.data);
+        if (value['content_revision'] is num && value['instance'] is String) {
+          serverRevision = value;
+        }
+      } catch (_) {
+        // 旧服务端不支持版本校验时，继续使用原来的后台刷新流程。
+      }
+      if (_disposed || token.isCancelled) return;
+      if (!force &&
+          hadContent &&
+          (cache == null || cache!.revision == _cacheRevision) &&
+          initialChapter == null &&
+          serverRevision != null &&
+          _serverRevision != null &&
+          [
+            'instance',
+            'content_revision',
+            'reading_revision',
+            'progress_revision'
+          ].every((key) => serverRevision![key] == _serverRevision![key])) {
+        return;
+      }
+      catalogue.invalidate();
       final results = await Future.wait<dynamic>([
         api.get('/api/books/${Uri.encodeComponent(bookId)}',
             cancelToken: token),
@@ -437,6 +469,9 @@ class BookDetailState extends ChangeNotifier {
           target: initialChapter,
           preferLast:
               groupsDescending && initialChapter == null && !hadContent);
+      if (!_disposed && !token.isCancelled && error == null) {
+        _serverRevision = serverRevision;
+      }
     } catch (failure) {
       if (!_disposed && !token.isCancelled) {
         error = ApiError.messageFor(failure);
@@ -656,12 +691,12 @@ class BookshelfState extends ChangeNotifier {
   String sortBy = 'created_at';
   String searchQuery = '';
 
-  Future<void> load() async {
+  Future<void> load({bool background = false}) async {
     if (_disposed) return;
     _loadToken?.cancel('Shelf query replaced');
     final token = CancelToken();
     _loadToken = token;
-    loading = true;
+    loading = !background || books.isEmpty;
     error = null;
     notifyListeners();
     try {

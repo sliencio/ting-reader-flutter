@@ -14,6 +14,7 @@ import '../../../core/utils/formatters.dart';
 import '../../../core/utils/locale.dart';
 import '../../../core/utils/urls.dart';
 import '../../../shared/app_scope.dart';
+import '../../../shared/server_refresh_binding.dart';
 import '../../../shared/common/common_widgets.dart';
 import '../../../shared/common/chapter_type_selector.dart';
 import '../../../shared/common/media_widgets.dart';
@@ -46,6 +47,12 @@ class _BookDetailPageState extends State<BookDetailPage> {
   static const _chaptersPerGroup = 100;
 
   BookDetailState? _detail;
+  late final _serverRefresh = ServerRefreshBinding(
+    visible: () => mounted && TickerMode.valuesOf(context).enabled,
+    refresh: () async {
+      await _detail?.load();
+    },
+  );
   bool get _loading => _detail?.loading ?? true;
   bool get _chapterPageLoading => _detail?.pageLoading ?? false;
   Book? get _book => _detail?.book;
@@ -76,6 +83,8 @@ class _BookDetailPageState extends State<BookDetailPage> {
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_detail == null) _bindDetail();
+    _serverRefresh.bind(AppScope.appOf(context).serverChanges);
+    _serverRefresh.resume();
   }
 
   void _bindDetail() {
@@ -113,16 +122,17 @@ class _BookDetailPageState extends State<BookDetailPage> {
 
   @override
   void dispose() {
+    _serverRefresh.dispose();
     _detail?.removeListener(_detailChanged);
     _detail?.dispose();
     super.dispose();
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool force = false}) async {
     final initialChapterIdValue = widget.initialChapterId;
     _tagsExpanded = false;
     final detail = _detail;
-    await detail?.load(initialChapter: initialChapterIdValue);
+    await detail?.load(initialChapter: initialChapterIdValue, force: force);
     if (mounted &&
         identical(detail, _detail) &&
         initialChapterIdValue != null) {
@@ -386,7 +396,7 @@ class _BookDetailPageState extends State<BookDetailPage> {
     final themeColor = effectiveBookThemeColor(book.themeColor);
 
     final page = PageListView(
-      onRefresh: _load,
+      onRefresh: () => _load(force: true),
       children: [
         _DetailBackButton(onPressed: widget.onBack),
         if (_detail?.error != null)

@@ -13,6 +13,7 @@ class ProgressItem {
     this.coverUrl,
     this.libraryId,
     this.chapterDuration,
+    this.revision,
   });
 
   final String id;
@@ -26,6 +27,7 @@ class ProgressItem {
   final String? coverUrl;
   final String? libraryId;
   final int? chapterDuration;
+  final int? revision;
 
   factory ProgressItem.fromJson(Map<String, dynamic> json) {
     return ProgressItem(
@@ -40,6 +42,7 @@ class ProgressItem {
       coverUrl: readString(json, 'cover_url'),
       libraryId: readString(json, 'library_id'),
       chapterDuration: readInt(json, 'chapter_duration'),
+      revision: readInt(json, 'revision'),
     );
   }
 }

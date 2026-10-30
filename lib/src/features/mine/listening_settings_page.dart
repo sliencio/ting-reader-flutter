@@ -143,6 +143,10 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                     AppDestination.plugins),
                 entry(Icons.terminal_rounded, context.l10n.navLogs,
                     AppDestination.logs),
+                entry(
+                    Icons.build_circle_outlined,
+                    context.localeText('服务端维护', 'Server maintenance'),
+                    AppDestination.maintenance),
                 entry(Icons.group_rounded, context.l10n.navUsers,
                     AppDestination.users),
                 entry(

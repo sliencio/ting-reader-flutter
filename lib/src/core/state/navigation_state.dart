@@ -16,6 +16,7 @@ enum AppDestination {
   fnConnect,
   notifications,
   statistics,
+  maintenance,
   downloads,
   about,
   libraries,
@@ -131,6 +132,7 @@ class ShellNavigation {
         AppDestination.fnConnect ||
         AppDestination.notifications ||
         AppDestination.statistics ||
+        AppDestination.maintenance ||
         AppDestination.about =>
           AppDestination.mine,
         _ => AppDestination.bookshelf,
@@ -158,6 +160,7 @@ bool isMineDestination(AppDestination destination) => switch (destination) {
       AppDestination.fnConnect ||
       AppDestination.notifications ||
       AppDestination.statistics ||
+      AppDestination.maintenance ||
       AppDestination.downloads ||
       AppDestination.about =>
         true,
@@ -170,6 +173,7 @@ bool hidesMiniPlayer(AppDestination destination) => switch (destination) {
       AppDestination.fnConnect ||
       AppDestination.notifications ||
       AppDestination.statistics ||
+      AppDestination.maintenance ||
       AppDestination.about ||
       AppDestination.libraries ||
       AppDestination.plugins ||

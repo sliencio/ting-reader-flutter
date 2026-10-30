@@ -183,7 +183,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     needsHttpFallback: () => _usesGatewaySingleChapterPlayback,
     onRemotePosition: (bookId, chapterId, position) {
       if (_disposed || currentBook?.id != bookId || _audio.playing) {
-        return;
+        return false;
       }
       final remoteChapter =
           chapters.where((item) => item.id == chapterId).firstOrNull;
@@ -200,6 +200,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
         unawaited(_saveResumeRecord(includePending: true));
         _notifyIfActive();
       }
+      return remoteChapter != null;
     },
   );
   final _TranscodeClock _clock = _TranscodeClock();
