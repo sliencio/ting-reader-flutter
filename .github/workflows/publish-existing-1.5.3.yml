@@ -1,0 +1,51 @@
+name: Publish existing 1.5.3 artifacts
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/publish-existing-1.5.3.yml
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: publish-existing-1.5.3
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GH_REPO: ${{ github.repository }}
+      SOURCE_RUN: '41088876076'
+    steps:
+      - name: Verify completed source build
+        run: |
+          gh api "repos/$GH_REPO/actions/runs/$SOURCE_RUN" > /tmp/source-run.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          run = json.loads(Path('/tmp/source-run.json').read_text())
+          assert run['head_sha'] == 'c1e46503bbdc248137351f7a2bb0f70856d3fa56'
+          assert run['path'] == '.github/workflows/release.yml'
+          assert run['status'] == 'completed' and run['conclusion'] == 'success'
+          PY
+          gh release view v1.5.3 --json body,title > /tmp/release-before.json
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: '41088876076'
+          path: dist
+          merge-multiple: true
+      - name: Replace existing assets and preserve release notes
+        run: |
+          for file in ting-reader-flutter-android.apk ting-reader-flutter-android.aab TingReader-windows-x64-setup.exe TingReader-linux-x64.tar.gz TingReader-macos.zip TingReader-ios-self-sign.ipa pubspec.lock; do
+            test -s "dist/$file"
+          done
+          gh release upload v1.5.3 dist/* --clobber
+          gh release view v1.5.3 --json body,title > /tmp/release-after.json
+          cmp /tmp/release-before.json /tmp/release-after.json
