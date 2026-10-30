@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 [CmdletBinding()]
 param()
 
@@ -8,8 +8,20 @@ $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $masterPath = Join-Path $projectRoot 'assets/branding/icon-teal-master.png'
 $master = [Drawing.Image]::FromFile($masterPath)
 
+function Draw-ScaledIcon {
+    param([Drawing.Graphics]$Graphics, [Drawing.Image]$Image, [int]$Size)
+    $attributes = New-Object Drawing.Imaging.ImageAttributes
+    try {
+        # 插值越过图片边界时使用镜像像素，避免透明像素在不透明图标上形成暗边。
+        $attributes.SetWrapMode([Drawing.Drawing2D.WrapMode]::TileFlipXY)
+        $destination = New-Object Drawing.Rectangle(0, 0, $Size, $Size)
+        $Graphics.DrawImage($Image, $destination, 0, 0, $Image.Width, $Image.Height,
+            [Drawing.GraphicsUnit]::Pixel, $attributes)
+    } finally { $attributes.Dispose() }
+}
+
 function New-IconBitmap {
-    param([int]$Size, [bool]$Rounded)
+    param([int]$Size, [bool]$Rounded, [Drawing.Image]$Source = $master)
     # 小图先放大绘制再缩小，让圆角和细线保留平滑边缘。
     $renderSize = [Math]::Max($Size, [Math]::Min(1024, $Size * 4))
     $canvas = New-Object Drawing.Bitmap($renderSize, $renderSize, ([Drawing.Imaging.PixelFormat]::Format32bppArgb))
@@ -31,7 +43,7 @@ function New-IconBitmap {
                 $graphics.SetClip($outline)
             } finally { $outline.Dispose() }
         }
-        $graphics.DrawImage($master, 0, 0, $renderSize, $renderSize)
+        Draw-ScaledIcon -Graphics $graphics -Image $Source -Size $renderSize
     } finally { $graphics.Dispose() }
 
     # iOS 与可遮罩网页图标使用不透明正方形，圆角由系统处理。
@@ -42,7 +54,7 @@ function New-IconBitmap {
         $graphics.InterpolationMode = [Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
         $graphics.PixelOffsetMode = [Drawing.Drawing2D.PixelOffsetMode]::HighQuality
         $graphics.CompositingMode = [Drawing.Drawing2D.CompositingMode]::SourceCopy
-        $graphics.DrawImage($canvas, 0, 0, $Size, $Size)
+        Draw-ScaledIcon -Graphics $graphics -Image $canvas -Size $Size
     } finally {
         $graphics.Dispose()
         $canvas.Dispose()
@@ -50,7 +62,40 @@ function New-IconBitmap {
     return ,$result
 }
 
+function Test-IconEdges {
+    # 用纯色基准验证四边，防止尺寸格式正确但混入暗边的回归。
+    $source = New-Object Drawing.Bitmap(31, 31, ([Drawing.Imaging.PixelFormat]::Format24bppRgb))
+    $graphics = [Drawing.Graphics]::FromImage($source)
+    $expected = [Drawing.Color]::FromArgb(20, 108, 120)
+    try { $graphics.Clear($expected) } finally { $graphics.Dispose() }
+    try {
+        foreach ($size in @(16, 20, 29, 32, 58, 64, 120, 167, 256, 512, 1024)) {
+            $square = New-IconBitmap -Size $size -Rounded $false -Source $source
+            try {
+                for ($i = 0; $i -lt $size; $i++) {
+                    foreach ($color in @($square.GetPixel($i, 0), $square.GetPixel($i, $size - 1), $square.GetPixel(0, $i), $square.GetPixel($size - 1, $i))) {
+                        if ($color.ToArgb() -ne $expected.ToArgb()) {
+                            throw "不透明图标存在边缘色差：$size"
+                        }
+                    }
+                }
+            } finally { $square.Dispose() }
+            $rounded = New-IconBitmap -Size $size -Rounded $true -Source $source
+            try {
+                $middle = [int][Math]::Floor($size / 2)
+                foreach ($color in @($rounded.GetPixel($middle, 0), $rounded.GetPixel($middle, $size - 1), $rounded.GetPixel(0, $middle), $rounded.GetPixel($size - 1, $middle))) {
+                    if ($color.ToArgb() -ne $expected.ToArgb()) {
+                        throw "圆角图标的直边存在色差或意外透明：$size"
+                    }
+                }
+                if ($rounded.GetPixel(0, 0).A -ne 0) { throw "圆角没有正确导出：$size" }
+            } finally { $rounded.Dispose() }
+        }
+    } finally { $source.Dispose() }
+}
+
 try {
+    Test-IconEdges
     $pngs = @((Join-Path $projectRoot 'assets/images/logo.png'), (Join-Path $projectRoot 'web/favicon.png'))
     $pngs += @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'android/app/src/main/res') -Filter 'ic_launcher.png' -File -Recurse | ForEach-Object FullName)
     foreach ($folder in @('ios/Runner/Assets.xcassets/AppIcon.appiconset', 'macos/Runner/Assets.xcassets/AppIcon.appiconset', 'web/icons')) {
