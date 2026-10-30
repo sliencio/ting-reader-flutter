@@ -367,6 +367,106 @@ void main() {
     });
   }
 
+  for (final (size, scale, sidebar) in [
+    (const Size(1280, 686), 1.0, false),
+    (const Size(1024, 566), 1.0, false),
+    (const Size(853, 446), 1.0, false),
+    (const Size(1024, 566), 1.5, false),
+    (const Size(1280, 686), 1.0, true),
+  ]) {
+    for (final shape in ['square', 'rect']) {
+      testWidgets('桌面播放详情首屏显示完整控件 $size 缩放 $scale 侧栏 $sidebar 封面 $shape',
+          (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+        addTearDown(() => debugDefaultTargetPlatformOverride = null);
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final (app, player) = await _pump(tester, size);
+        app.settings = {'bookshelf_cover_shape': shape};
+        if (sidebar) {
+          await tester.tap(find.byTooltip('Settings'));
+          await tester.pumpAndSettle();
+        }
+        player.book = Book.fromJson({'id': 'book', 'title': '书籍标题'});
+        player.chapter = Chapter.fromJson({
+          'id': 'chapter',
+          'book_id': 'book',
+          'title': '正在播放的章节',
+          'duration': 600,
+        });
+        player.expanded = true;
+        player.notifyListeners();
+        await tester.pumpAndSettle();
+        final overlay = find.byType(ExpandedPlayerOverlay);
+        final bounds = tester.getRect(overlay);
+        for (final icon in [
+          Icons.keyboard_arrow_down_rounded,
+          Icons.skip_previous_rounded,
+          Icons.play_arrow_rounded,
+          Icons.skip_next_rounded,
+          Icons.list_alt_rounded,
+        ]) {
+          final target =
+              find.descendant(of: overlay, matching: find.byIcon(icon));
+          final rect = tester.getRect(target);
+          expect(bounds.contains(rect.topLeft), isTrue, reason: '$icon 顶部应可见');
+          expect(bounds.contains(rect.bottomRight), isTrue,
+              reason: '$icon 底部应可见');
+          expect(target.hitTestable(), findsOneWidget);
+        }
+        final slider =
+            find.descendant(of: overlay, matching: find.byType(Slider));
+        await tester.drag(slider, const Offset(60, 0));
+        await tester.pumpAndSettle();
+        expect(player.position, greaterThan(20));
+        await tester.tap(find.descendant(
+            of: overlay, matching: find.byIcon(Icons.play_arrow_rounded)));
+        await tester.pumpAndSettle();
+        expect(player.toggles, 1);
+        expect(tester.takeException(), isNull);
+        debugDefaultTargetPlatformOverride = null;
+      });
+    }
+  }
+
+  testWidgets('桌面播放详情窄窗可滚动操作，放大窗口后恢复首屏布局', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    final (_, player) = await _pump(tester, const Size(560, 400));
+    player.book = Book.fromJson({'id': 'book', 'title': '书籍'});
+    player.chapter = Chapter.fromJson({
+      'id': 'chapter',
+      'book_id': 'book',
+      'title': '章节',
+      'duration': 600,
+    });
+    player.expanded = true;
+    player.notifyListeners();
+    await tester.pumpAndSettle();
+    final overlay = find.byType(ExpandedPlayerOverlay);
+    final play = find.descendant(
+        of: overlay, matching: find.byIcon(Icons.play_arrow_rounded));
+    await tester.ensureVisible(play);
+    await tester.pumpAndSettle();
+    await tester.tap(play);
+    await tester.pumpAndSettle();
+    expect(player.toggles, 1);
+    tester.view.physicalSize = const Size(1280, 686);
+    await tester.pumpAndSettle();
+    final pause = find.descendant(
+        of: overlay, matching: find.byIcon(Icons.pause_rounded));
+    expect(pause.hitTestable(), findsOneWidget);
+    expect(
+        find
+            .descendant(
+                of: overlay,
+                matching: find.byIcon(Icons.keyboard_arrow_down_rounded))
+            .hitTestable(),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
     testWidgets('$platform 设置支持右滑打开左滑隐藏，主页键清除子页并保留书架', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
