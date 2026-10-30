@@ -696,8 +696,8 @@ void bookWorkflowTests() {
     final detail = BookDetailState(api, 'book');
     addTearDown(detail.dispose);
     final first = detail.load();
-      await Future<void>.delayed(Duration.zero);
-      expect(reads, 1);
+    await Future<void>.delayed(Duration.zero);
+    expect(reads, 1);
     await detail.load();
     expect(detail.book!.title, 'Current');
     expect(detail.groupsDescending, isTrue);
