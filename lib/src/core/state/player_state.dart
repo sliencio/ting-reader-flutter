@@ -121,7 +121,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
         .listen((_) {}, onError: _handleNativePlaybackError);
     if (!kIsWeb) {
       audio_background.JustAudioBackground.setBeforePlayHandler(
-          _prepareSmartResume);
+          _prepareBackgroundPlayback);
       audio_background.JustAudioBackground.setSeekHandler(
         (position) => seek(position.inMilliseconds / 1000),
       );

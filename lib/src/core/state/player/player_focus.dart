@@ -2,6 +2,15 @@ part of '../player_state.dart';
 
 /// Audio focus, interruption handling and headset disconnection.
 extension _PlayerAudioFocus on PlayerState {
+  Future<void> _prepareBackgroundPlayback() async {
+    await _audioSessionReady;
+    if (_disposed) return;
+    // Other plugins can replace the process-wide iOS session configuration.
+    // Restore the selected policy before the background handler activates it.
+    await _configureAudioSession();
+    if (!_disposed) await _prepareSmartResume();
+  }
+
   Future<void> _setAudioFocusPolicy(bool value) async {
     if (!kIsWeb) {
       audio_background.JustAudioBackground.setAudioFocusEnabled(
@@ -13,7 +22,7 @@ extension _PlayerAudioFocus on PlayerState {
     ignoreAudioFocus = value;
     _cancelFocusRecovery(clearResume: value);
     await _configureAudioSession();
-    if (ignoreAudioFocus) {
+    if (ignoreAudioFocus && defaultTargetPlatform == TargetPlatform.android) {
       await _deactivateAudioSession();
     } else if (isPlaying || _audio.playing) {
       await _activateAudioSessionForPlayback();
@@ -45,9 +54,13 @@ extension _PlayerAudioFocus on PlayerState {
                   audio_session.AndroidAudioFocusGainType.gain,
               androidWillPauseWhenDucked: false,
             )
-          : const audio_session.AudioSessionConfiguration.speech();
+          : const audio_session.AudioSessionConfiguration.speech().copyWith(
+              avAudioSessionCategoryOptions:
+                  audio_session.AVAudioSessionCategoryOptions.none,
+            );
       await session.configure(config);
-    } catch (_) {
+    } catch (failure) {
+      debugPrint('Audio session configuration failed: $failure');
       // Unsupported platforms should not block in-app playback.
     }
   }

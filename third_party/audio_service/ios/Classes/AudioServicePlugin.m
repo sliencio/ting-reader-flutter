@@ -242,13 +242,22 @@ static NSMutableDictionary *nowPlayingInfo = nil;
     }
 }
 
+- (void)logRemoteCommand:(NSString *)command {
+    AVAudioSession *session = [AVAudioSession sharedInstance];
+    NSLog(@"[TingRemote] command=%@ playing=%d actions=%ld category=%@ options=%lu mode=%@",
+          command, playing, actionBits, session.category,
+          (unsigned long)session.categoryOptions, session.mode);
+}
+
 - (MPRemoteCommandHandlerStatus) play: (MPRemoteCommandEvent *) event {
+    [self logRemoteCommand:@"play"];
     //NSLog(@"play");
     [handlerChannel invokeMethod:@"play" arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
 - (MPRemoteCommandHandlerStatus) pause: (MPRemoteCommandEvent *) event {
+    [self logRemoteCommand:@"pause"];
     //NSLog(@"pause");
     [handlerChannel invokeMethod:@"pause" arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
@@ -454,6 +463,7 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 }
 
 - (MPRemoteCommandHandlerStatus) togglePlayPause: (MPRemoteCommandEvent *) event {
+    [self logRemoteCommand:@"togglePlayPause"];
     //NSLog(@"togglePlayPause");
     [handlerChannel invokeMethod:@"click" arguments:@{
         @"button":@(0)
@@ -468,12 +478,14 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 }
 
 - (MPRemoteCommandHandlerStatus) nextTrack: (MPRemoteCommandEvent *) event {
+    [self logRemoteCommand:@"nextTrack"];
     //NSLog(@"nextTrack");
     [handlerChannel invokeMethod:@"skipToNext" arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
 - (MPRemoteCommandHandlerStatus) previousTrack: (MPRemoteCommandEvent *) event {
+    [self logRemoteCommand:@"previousTrack"];
     //NSLog(@"previousTrack");
     [handlerChannel invokeMethod:@"skipToPrevious" arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;

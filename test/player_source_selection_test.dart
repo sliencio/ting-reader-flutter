@@ -109,10 +109,15 @@ class _NativeNotifications {
   }
 
   void clickHeadset() {
+    sendCommand('click', {'button': 0});
+  }
+
+  void sendCommand(String command,
+      [Map<String, dynamic> arguments = const {}]) {
     binding.channelBuffers.push(
       _handler.name,
       const StandardMethodCodec().encodeMethodCall(
-        const MethodCall('click', {'button': 0}),
+        MethodCall(command, arguments),
       ),
       (_) {},
     );
@@ -466,15 +471,62 @@ void main() {
           notifications.states.last['playing'] == true);
       expect(notifications.states.last['systemActions'],
           contains(toggleAction.index));
+      expect(
+          notifications.states.last['systemActions'],
+          containsAll([
+            MediaActionMessage.play.index,
+            MediaActionMessage.pause.index,
+          ]));
       notifications.clickHeadset();
       await waitForPlayback(() =>
           !player.isPlaying && notifications.states.last['playing'] == false);
       expect(notifications.states.last['systemActions'],
           contains(toggleAction.index));
+      expect(
+          notifications.states.last['systemActions'],
+          containsAll([
+            MediaActionMessage.play.index,
+            MediaActionMessage.pause.index,
+          ]));
       notifications.clickHeadset();
       await waitForPlayback(
           () => player.isPlaying && native.playCount == cycle + 2);
     }
+  });
+
+  test(
+      'headset resume restores the disabled mixing policy after another plugin',
+      () async {
+    await startFocusPlayback();
+    notifications.sendCommand('pause');
+    await waitForPlayback(() => !player.isPlaying);
+    final session = await AudioSession.instance;
+    await session.configure(const AudioSessionConfiguration(
+      avAudioSessionCategory: AVAudioSessionCategory.playback,
+      avAudioSessionCategoryOptions:
+          AVAudioSessionCategoryOptions.mixWithOthers,
+    ));
+    notifications.sendCommand('play');
+    await waitForPlayback(() => native.playCount == 2 && player.isPlaying);
+    expect(session.configuration?.avAudioSessionCategory,
+        AVAudioSessionCategory.playback);
+    expect(session.configuration?.avAudioSessionCategoryOptions,
+        AVAudioSessionCategoryOptions.none);
+    expect(session.configuration?.avAudioSessionMode,
+        AVAudioSessionMode.spokenAudio);
+  });
+
+  test('remote next and previous commands move the active chapter', () async {
+    native.holdPlayback = true;
+    native.emitSeeks = true;
+    final first = chapter('/server/first.mp3', id: 'first');
+    final second = chapter('/server/second.mp3', id: 'second', index: 1);
+    unawaited(player.playChapter(book, [first, second], first));
+    await waitForPlayback(() => player.isPlaying && native.playCount == 1);
+    notifications.sendCommand('skipToNext');
+    await waitForPlayback(() => player.currentChapter?.id == second.id);
+    notifications.sendCommand('skipToPrevious');
+    await waitForPlayback(() => player.currentChapter?.id == first.id);
   });
 
   String resumeIdentity() => '${app.serverUrl}:${app.fnId}:${app.user?.id}';

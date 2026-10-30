@@ -1025,6 +1025,10 @@ class _PlayerAudioHandler extends BaseAudioHandler
     playbackState.add(playbackState.nvalue!.copyWith(
       controls: controls,
       systemActions: {
+        // Explicit play/pause commands are idempotent and must remain available
+        // to accessories even while the visible notification button changes.
+        MediaAction.play,
+        MediaAction.pause,
         // AirPods send togglePlayPause on Apple platforms. Without this action,
         // audio_service disables that command when it refreshes native controls.
         MediaAction.playPause,
