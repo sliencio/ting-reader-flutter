@@ -89,9 +89,12 @@ class _BookDetailPageState extends State<BookDetailPage> {
 
   void _bindDetail() {
     final app = AppScope.appOf(context);
+    final cachedBook = app.bookshelfCache.book(
+        app.api.sessionIdentity?.call() ?? app.api.baseUrl, widget.bookId);
     _detail = BookDetailState(app.api, widget.bookId,
         cache: app.bookDetailsCache,
-        cacheKey: '${app.serverUrl}:${app.user?.id}:${widget.bookId}')
+        initialBook: cachedBook == null ? null : Book.fromJson(cachedBook),
+        cacheKey: '${app.bookCacheIdentity}:${widget.bookId}')
       ..addListener(_detailChanged);
     _load();
   }

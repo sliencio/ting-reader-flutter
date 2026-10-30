@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 import '../api/api_error.dart';
 import '../models/models.dart';
@@ -281,6 +282,89 @@ typedef _BookDetailSnapshot = ({
 class BookDetailsCache {
   final _entries = <String, _BookDetailSnapshot>{};
   int revision = 0;
+  static const _storageKey = 'book_details_cache_v1';
+  Future<void>? _restoring;
+  Future<void> _saving = Future.value();
+
+  Future<void> _restore() => _restoring ??= _restoreDisk();
+
+  Future<void> _restoreDisk() async {
+    final generation = revision;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_storageKey);
+      if (raw == null || generation != revision) return;
+      final savedEntries = asMap(jsonDecode(raw)).entries.toList();
+      for (final entry in savedEntries.reversed.take(24).toList().reversed) {
+        try {
+          final saved = asMap(entry.value);
+          final book = Book.fromJson(asMap(saved['book']));
+          if (book.id.isEmpty) continue;
+          _entries.putIfAbsent(entry.key, () => (
+            book: book,
+            progress: saved['progress'] == null ? null
+                : ProgressItem.fromJson(asMap(saved['progress'])),
+            settings: asMap(saved['settings']),
+            chapters: asMapList(saved['chapters']).map(Chapter.fromJson).toList(),
+            total: saved['total'] as int,
+            mainTotal: saved['main_total'] as int,
+            extraTotal: saved['extra_total'] as int,
+            tab: saved['tab'] as String,
+            group: saved['group'] as int,
+            ascending: saved['ascending'] as bool,
+            groupsDescending: saved['groups_descending'] as bool,
+            serverRevision: saved['server_revision'] == null ? null
+                : asMap(saved['server_revision']),
+          ));
+        } catch (_) {
+          // One damaged book must not discard the other entries.
+        }
+      }
+    } catch (_) {
+      // Local storage is best effort.
+    }
+  }
+
+  Future<void> flush() => _saving;
+
+  void _persist() {
+    final snapshot = jsonEncode({
+      for (final entry in _entries.entries) entry.key: {
+        'book': entry.value.book.toJson(),
+        'chapters': entry.value.chapters.map((item) => item.toJson()).toList(),
+        'progress': entry.value.progress == null ? null : {
+          'id': entry.value.progress!.id,
+          'book_id': entry.value.progress!.bookId,
+          'chapter_id': entry.value.progress!.chapterId,
+          'position': entry.value.progress!.position,
+          'duration': entry.value.progress!.duration,
+          'updated_at': entry.value.progress!.updatedAt,
+          'revision': entry.value.progress!.revision,
+        },
+        // Details only need presentation/order preferences, never credentials.
+        'settings': {
+          for (final setting in entry.value.settings.entries)
+            if (setting.key.startsWith('bookshelf_') ||
+                setting.key == 'chapter_group_orders')
+              setting.key: setting.value,
+        },
+        'total': entry.value.total,
+        'main_total': entry.value.mainTotal,
+        'extra_total': entry.value.extraTotal,
+        'tab': entry.value.tab,
+        'group': entry.value.group,
+        'ascending': entry.value.ascending,
+        'groups_descending': entry.value.groupsDescending,
+        'server_revision': entry.value.serverRevision,
+      },
+    });
+    _saving = _saving.then((_) async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_storageKey, snapshot);
+    }).catchError((Object _) {
+      // Do not interrupt browsing on disk failure.
+    });
+  }
 
   _BookDetailSnapshot? _read(String key) {
     final value = _entries.remove(key);
@@ -292,11 +376,13 @@ class BookDetailsCache {
     _entries.remove(key);
     _entries[key] = value;
     if (_entries.length > 24) _entries.remove(_entries.keys.first);
+    _persist();
   }
 
   void clear() {
     _entries.clear();
     revision++;
+    _persist();
   }
 
   void markChaptersRead(String key, Set<String> ids) {
@@ -323,13 +409,20 @@ class BookDetailsCache {
 }
 
 class BookDetailState extends ChangeNotifier {
-  BookDetailState(this.api, this.bookId, {this.cache, String? cacheKey})
+  BookDetailState(this.api, this.bookId,
+      {this.cache, String? cacheKey, Book? initialBook})
       : catalogue = ChapterCatalogue(api, bookId),
         operations = BookOperations(api),
         cacheKey = cacheKey ?? bookId,
         _cacheRevision = cache?.revision ?? 0 {
     final saved = cache?._read(this.cacheKey);
-    if (saved == null) return;
+    if (saved == null) {
+      if (initialBook?.id == bookId) {
+        book = initialBook;
+        loading = false;
+      }
+      return;
+    }
     book = saved.book;
     progress = saved.progress;
     settings = Map.of(saved.settings);
@@ -407,6 +500,26 @@ class BookDetailState extends ChangeNotifier {
     pageLoading = false;
     final token = CancelToken();
     _loadToken = token;
+    if (_serverRevision == null && cache?.revision == _cacheRevision) {
+      await cache?._restore();
+      if (_disposed || token.isCancelled) return;
+      final saved = cache?._read(cacheKey);
+      if (saved != null && cache?.revision == _cacheRevision) {
+        book = saved.book;
+        progress = saved.progress;
+        settings = Map.of(saved.settings);
+        chapters = List.of(saved.chapters);
+        total = saved.total;
+        mainTotal = saved.mainTotal;
+        extraTotal = saved.extraTotal;
+        tab = saved.tab;
+        group = saved.group;
+        ascending = saved.ascending;
+        groupsDescending = saved.groupsDescending;
+        _serverRevision = saved.serverRevision;
+        groupOrders = readChapterGroupOrders(settings);
+      }
+    }
     final hadContent = book != null;
     loading = !hadContent;
     error = null;
@@ -468,8 +581,9 @@ class BookDetailState extends ChangeNotifier {
       }
       await loadPage(
           target: initialChapter,
+          background: hadContent && initialChapter == null,
           preferLast:
-              groupsDescending && initialChapter == null && !hadContent);
+              groupsDescending && initialChapter == null && chapters.isEmpty);
       if (!_disposed && !token.isCancelled && error == null) {
         _serverRevision = serverRevision;
       }
@@ -489,10 +603,11 @@ class BookDetailState extends ChangeNotifier {
       {String? requestedTab,
       int? requestedGroup,
       String? target,
-      bool preferLast = false}) async {
+      bool preferLast = false,
+      bool background = false}) async {
     if (_disposed || book == null) return null;
     final revision = ++_pageRevision;
-    pageLoading = true;
+    pageLoading = !background || chapters.isEmpty;
     _notify();
     try {
       final page = await catalogue.page({
@@ -677,7 +792,20 @@ List<Map<String, String>> serializeChapterGroupOrders(
 
 /// Shelf data and ordering rules. Selection, scrolling and overlays are UI state.
 class BookshelfState extends ChangeNotifier {
-  BookshelfState(this.api) : operations = BookOperations(api);
+  BookshelfState(this.api, {BookshelfCache? cache})
+      : operations = BookOperations(api),
+        _cache = cache ?? BookshelfCache() {
+    final saved = _cache.peek(_identity);
+    if (saved != null) {
+      try {
+        _applySnapshot(saved);
+        _loadedIdentity = _identity;
+        loading = false;
+      } catch (_) {
+        // Fall back to the persisted snapshot or server.
+      }
+    }
+  }
   final ApiClient api;
   final BookOperations operations;
   CancelToken? _loadToken;
@@ -691,7 +819,7 @@ class BookshelfState extends ChangeNotifier {
   String selectedLibrary = '';
   String sortBy = 'created_at';
   String searchQuery = '';
-  final _cache = BookshelfCache();
+  final BookshelfCache _cache;
   String? _loadedIdentity;
   bool hasSnapshot = false;
 

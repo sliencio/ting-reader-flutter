@@ -242,6 +242,8 @@ class _AppShellState extends State<AppShell> {
     await app.loadSettings();
     if (!mounted) return;
     app.bookDetailsCache.clear();
+    await app.coverCache.invalidate();
+    if (!mounted) return;
     PaintingBinding.instance.imageCache
       ..clear()
       ..clearLiveImages();
@@ -409,7 +411,7 @@ class _AppShellState extends State<AppShell> {
   Widget _page() {
     final app = AppScope.appOf(context);
     final identity =
-        '${app.serverUrl}:${app.user?.id}:${app.offlineMode}:${app.bookDetailsCache.revision}';
+        '${app.bookCacheIdentity}:${app.offlineMode}:${app.bookDetailsCache.revision}';
     if (_pageIdentity != identity) {
       _primaryPages.clear();
       _pageIdentity = identity;

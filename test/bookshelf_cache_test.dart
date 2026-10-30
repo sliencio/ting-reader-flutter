@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/services/bookshelf_cache.dart';
 import 'package:ting_reader_flutter/src/core/state/books_state.dart';
+import 'package:ting_reader_flutter/src/core/models/models.dart';
 
 class _ShelfApi extends ApiClient {
   Future<void>? gate;
@@ -84,6 +85,29 @@ void main() {
     await pending;
     expect(restored.books.single.title, '更新后的书籍');
   });
+
+  for (final path in ['/nas/book/chapter.mp3', '/nas/book/chapter.strm']) {
+    test('书架重建无需等待磁盘，详情复用书架元数据：$path', () async {
+      final api = _ShelfApi()..sessionIdentity = () => 'NAS:reader';
+      addTearDown(api.close);
+      final cache = BookshelfCache();
+      final first = BookshelfState(api, cache: cache);
+      await first.load();
+      first.dispose();
+      final restored = BookshelfState(api, cache: cache);
+      addTearDown(restored.dispose);
+      expect(restored.loading, isFalse);
+      expect(restored.books.single.title, '原书籍');
+      final metadata = cache.book('NAS:reader', 'book')!;
+      final detail = BookDetailState(api, 'book', initialBook:
+          Book.fromJson({...metadata, 'path': path, 'description': '本地简介'}));
+      addTearDown(detail.dispose);
+      expect(detail.loading, isFalse);
+      expect(detail.book?.path, path);
+      expect(detail.book?.description, '本地简介');
+      expect(cache.book('其他NAS:reader', 'book'), isNull);
+    });
+  }
 
   test('刷新保留书架，离线失败保留缓存，空书架也可恢复', () async {
     final api = _ShelfApi();

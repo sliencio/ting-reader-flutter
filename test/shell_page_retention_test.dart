@@ -18,6 +18,7 @@ import 'package:ting_reader_flutter/src/core/state/download_state.dart';
 import 'package:ting_reader_flutter/src/core/state/player_state.dart';
 import 'package:ting_reader_flutter/src/features/app_shell.dart';
 import 'package:ting_reader_flutter/src/features/bookshelf/bookshelf_page.dart';
+import 'package:ting_reader_flutter/src/features/bookshelf/book_detail/book_detail_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/downloads_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/about_update_dialog.dart';
 import 'package:ting_reader_flutter/src/features/player/mini_player.dart';
@@ -26,11 +27,31 @@ import 'package:ting_reader_flutter/src/shared/common/media_widgets.dart';
 
 class _Api extends ApiClient {
   final requests = <String>[];
+  String? bookPath;
 
   @override
   Future<Response<dynamic>> get(String path,
       {Map<String, dynamic>? params, CancelToken? cancelToken}) async {
     requests.add(path);
+    if (bookPath != null) {
+      final book = {'id': 'cached-book', 'library_id': 'library',
+        'title': 'Cached book', 'path': bookPath, 'library_type': 'local'};
+      final dynamic cachedData = switch (path) {
+        '/api/books' => [book],
+        '/api/books/cached-book' => book,
+        '/api/books/cached-book/revision' => {
+          'instance': 'test', 'content_revision': 1,
+          'reading_revision': 0, 'progress_revision': 0,
+        },
+        '/api/books/cached-book/chapters' => {
+          'chapters': [], 'total': 0, 'main_total': 0, 'extra_total': 0,
+        },
+        _ => null,
+      };
+      if (cachedData != null) {
+        return Response(requestOptions: RequestOptions(path: path), data: cachedData);
+      }
+    }
     return Response(
       requestOptions: RequestOptions(path: path),
       data: path == '/api/settings' ||
@@ -118,7 +139,7 @@ class _Player extends ChangeNotifier implements PlayerState {
 }
 
 Future<(_App, _Player)> _pump(WidgetTester tester, Size size,
-    {bool admin = false}) async {
+    {bool admin = false, String? bookPath}) async {
   tester.view.devicePixelRatio = 1;
   tester.view.physicalSize = size;
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -128,6 +149,7 @@ Future<(_App, _Player)> _pump(WidgetTester tester, Size size,
     ..user =
         User(id: 'user', username: 'reader', role: admin ? 'admin' : 'user');
   final player = _Player();
+  app.client.bookPath = bookPath;
   final downloads = DownloadState(app);
   addTearDown(app.dispose);
   addTearDown(player.dispose);
@@ -166,6 +188,24 @@ Future<void> _select(WidgetTester tester, String label) async {
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  for (final path in ['/nas/book/chapter.mp3', '/nas/book/chapter.strm']) {
+    testWidgets('iPhone进入书籍再返回保留书架，不重复加载：$path', (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final (app, _) = await _pump(tester, const Size(390, 844), bookPath: path);
+      final shelf = tester.state(find.byType(BookshelfPage));
+      final count = app.client.requests.where((path) => path == '/api/books').length;
+      await tester.tap(find.text('Cached book'));
+      await tester.pumpAndSettle();
+      expect(find.byType(BookDetailPage), findsOneWidget);
+      await tester.tap(find.text('Back').first);
+      await tester.pumpAndSettle();
+      expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
+      expect(find.text('Cached book'), findsOneWidget);
+      expect(app.client.requests.where((path) => path == '/api/books').length, count);
+      expect(tester.takeException(), isNull);
+    });
+  }
   for (final platform in [
     TargetPlatform.android,
     TargetPlatform.iOS,

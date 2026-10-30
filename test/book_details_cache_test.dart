@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/state/books_state.dart';
 
@@ -44,6 +45,54 @@ class _Api extends ApiClient {
 }
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test('详情持久化后重启，慢网络和离线仍先显示本地内容', () async {
+    final api = _Api();
+    final firstCache = BookDetailsCache();
+    final first = BookDetailState(api, 'book',
+        cache: firstCache, cacheKey: 'server:user:book');
+    await first.load();
+    await firstCache.flush();
+    first.dispose();
+    api.gate = Completer<void>();
+    api.fail = true;
+    final restored = BookDetailState(api, 'book',
+        cache: BookDetailsCache(), cacheKey: 'server:user:book');
+    addTearDown(restored.dispose);
+    final ready = Completer<void>();
+    restored.addListener(() {
+      if (!restored.loading && restored.book != null && !ready.isCompleted) {
+        ready.complete();
+      }
+    });
+    final load = restored.load();
+    await ready.future.timeout(const Duration(seconds: 2));
+    expect(restored.book?.title, '旧标题');
+    expect(restored.chapters.single.id, 'chapter');
+    expect(restored.progress?.position, 42);
+    api.gate!.complete();
+    await load;
+    expect(restored.book?.title, '旧标题');
+    expect(restored.error, isNotNull);
+  });
+
+  test('清空缓存同时清除磁盘副本，重启不会恢复旧详情', () async {
+    final api = _Api();
+    final cache = BookDetailsCache();
+    final first = BookDetailState(api, 'book', cache: cache);
+    await first.load();
+    first.dispose();
+    cache.clear();
+    await cache.flush();
+    api.fail = true;
+    final restored = BookDetailState(api, 'book', cache: BookDetailsCache());
+    addTearDown(restored.dispose);
+    await restored.load();
+    expect(restored.book, isNull);
+  });
+
   test('同步章节已读保留详情缓存和续播位置，不影响其他账号', () async {
     final api = _Api();
     final cache = BookDetailsCache();

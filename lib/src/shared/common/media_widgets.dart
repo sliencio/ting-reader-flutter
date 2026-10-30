@@ -1,5 +1,7 @@
 import 'dart:io';
 import 'dart:math' as math;
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
@@ -265,6 +267,9 @@ class CoverImage extends StatefulWidget {
 }
 
 class _CoverImageState extends State<CoverImage> {
+  Future<File?>? _cachedCover;
+  File? _diskCover;
+  String? _cacheRequest;
   bool _recoveringRedirect = false;
   int _retryEpoch = 0;
   String? _failedUrl;
@@ -313,10 +318,83 @@ class _CoverImageState extends State<CoverImage> {
                   errorBuilder: (context, error, stackTrace) =>
                       _placeholder(context),
                 )
-              : Image.network(
+              : _cachedImage(context, url, imageHeaders),
+    );
+  }
+
+  Widget _cachedImage(BuildContext context, String url,
+      Map<String, String> headers) {
+    final app = AppScope.appOf(context);
+    final cache = app.coverCache;
+    final ownOrigin = app.usesActiveOrigin(url);
+    final key = cache.key(app.bookCacheIdentity, url,
+        serverResource: ownOrigin);
+    final version = app.coverCacheVersion;
+    final request = '$key:$version:${cache.generation}';
+    if (_cacheRequest != request) {
+      _cacheRequest = request;
+      _diskCover = cache.peek(key);
+      // Requests use the current credentials; the persistent key excludes them.
+      _cachedCover = cache.load(key, () async {
+        final Response<dynamic> response;
+        if (ownOrigin) {
+          response = await app.api.getBytes(url);
+        } else {
+          final client = Dio(BaseOptions(
+            connectTimeout: const Duration(seconds: 12),
+            receiveTimeout: const Duration(seconds: 30),
+          ));
+          try {
+            response = await client.get<List<int>>(url,
+                options: Options(responseType: ResponseType.bytes),
+            );
+          } finally {
+            client.close();
+          }
+        }
+        final bytes = List<int>.from(response.data as List);
+        // A gateway login page must never become a cached cover.
+        final codec = await ui.instantiateImageCodec(Uint8List.fromList(bytes));
+        try {
+          final frame = await codec.getNextFrame();
+          frame.image.dispose();
+        } finally {
+          codec.dispose();
+        }
+        return bytes;
+      }, version: version, onCached: (file) {
+        if (mounted && _cacheRequest == request && _diskCover?.path != file.path) {
+          setState(() => _diskCover = file);
+        }
+      });
+    }
+    return FutureBuilder<File?>(
+      key: ValueKey(request),
+      future: _cachedCover,
+      initialData: cache.peek(key),
+      builder: (context, snapshot) {
+        final file = snapshot.data ?? _diskCover;
+        if (file != null) {
+          return Image.file(file,
+              fit: widget.fit,
+              width: double.infinity,
+              height: double.infinity,
+              errorBuilder: (context, error, stackTrace) =>
+                  _networkImage(context, url, headers));
+        }
+        if (snapshot.connectionState != ConnectionState.done) {
+          return _placeholder(context, loading: true);
+        }
+        return _networkImage(context, url, headers);
+      },
+    );
+  }
+
+  Widget _networkImage(BuildContext context, String url,
+      Map<String, String> headers) => Image.network(
                   url,
                   key: ValueKey('$url:$_retryEpoch'),
-                  headers: imageHeaders.isEmpty ? null : imageHeaders,
+                  headers: headers.isEmpty ? null : headers,
                   fit: widget.fit,
                   width: double.infinity,
                   height: double.infinity,
@@ -328,9 +406,7 @@ class _CoverImageState extends State<CoverImage> {
                     if (progress == null) return child;
                     return _placeholder(context, loading: true);
                   },
-                ),
-    );
-  }
+                );
 
   void _recoverRedirectAndRetry(String url) {
     if (_recoveringRedirect || _failedUrl == url) return;

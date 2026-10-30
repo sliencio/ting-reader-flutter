@@ -17,6 +17,8 @@ import '../plugin_extensions/registry.dart';
 import '../models/models.dart';
 import '../services/session_monitor.dart';
 import '../services/chapter_read_sync.dart';
+import '../services/cover_cache.dart';
+import '../services/bookshelf_cache.dart';
 import '../utils/client_device_headers.dart';
 import '../utils/application_time_zone.dart' as app_time_zone;
 import '../utils/locale.dart';
@@ -44,6 +46,8 @@ bool _isFnosGatewayModeValue(Object? value) {
 }
 
 class AppState extends ChangeNotifier {
+  final coverCache = CoverCache();
+  final bookshelfCache = BookshelfCache();
   final bookDetailsCache = BookDetailsCache();
   final serverChanges = ValueNotifier<int>(0);
   Map<String, dynamic>? _serverVersion;
@@ -63,12 +67,8 @@ class AppState extends ChangeNotifier {
     if (previous != null &&
         ['instance', 'content_revision', 'reading_revision']
             .any((key) => previous[key] != value[key])) {
-      if (previous['instance'] != value['instance'] ||
-          previous['content_revision'] != value['content_revision']) {
-        PaintingBinding.instance.imageCache
-          ..clear()
-          ..clearLiveImages();
-      }
+      // CoverCache uses the server version and content digest to refresh images;
+      // clearing every decoded image here made returning to the shelf flash.
       serverChanges.value++;
     }
   }
@@ -114,7 +114,7 @@ class AppState extends ChangeNotifier {
     identity: () => '$serverUrl:$fnId:${user?.id}',
     canSync: () => !_disposed && !offlineMode && user != null && token != null,
     onSynced: (book, ids) =>
-        bookDetailsCache.markChaptersRead('$serverUrl:${user?.id}:$book', ids),
+        bookDetailsCache.markChaptersRead('$bookCacheIdentity:$book', ids),
   );
   late final PluginCapabilitiesApi pluginCapabilities =
       PluginCapabilitiesApi(api);
@@ -203,6 +203,10 @@ class AppState extends ChangeNotifier {
   bool needsDirectLogin = false;
   String get _sessionIdentity =>
       '${serverMode.name}|$serverUrl|$localServerUrl|$fnId|${user?.id}|${user?.username}';
+  String get bookCacheIdentity => _sessionIdentity;
+  String get coverCacheVersion => _serverVersionOwner == _sessionIdentity
+      ? '${_serverVersion?['instance']}:${_serverVersion?['content_revision']}'
+      : '';
   late final SessionMonitor _sessionMonitor = SessionMonitor(
     enabled: () =>
         !_disposed &&

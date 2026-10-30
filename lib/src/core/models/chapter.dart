@@ -25,6 +25,19 @@ class Chapter {
   final String? progressUpdatedAt;
   final bool isRead;
 
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'book_id': bookId,
+        'title': title,
+        'path': path,
+        'chapter_index': chapterIndex,
+        'duration': duration,
+        'is_extra': isExtra,
+        'progress_position': progressPosition,
+        'progress_updated_at': progressUpdatedAt,
+        'is_read': isRead,
+      };
+
   factory Chapter.fromJson(Map<String, dynamic> json) {
     return Chapter(
       id: readString(json, 'id') ?? '',
