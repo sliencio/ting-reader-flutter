@@ -13,6 +13,20 @@ import 'package:ting_reader_flutter/src/features/bookshelf/book_detail/book_deta
 import 'package:ting_reader_flutter/src/shared/app_scope.dart';
 
 class _Api extends ApiClient {
+  final readIds = <String>{};
+  final mutations = <String>[];
+  @override
+  Future<Response<dynamic>> post(String path,
+      {Object? data,
+      Map<String, dynamic>? params,
+      CancelToken? cancelToken,
+      Duration? receiveTimeout}) async {
+    mutations.add(path);
+    readIds.addAll(((data as Map)['chapter_ids'] as List).cast<String>());
+    return Response(
+        requestOptions: RequestOptions(path: path), statusCode: 204);
+  }
+
   @override
   Future<Response<dynamic>> get(String path,
       {Map<String, dynamic>? params, CancelToken? cancelToken}) async {
@@ -25,6 +39,7 @@ class _Api extends ApiClient {
                   'book_id': 'book',
                   'title': 'Chapter $id',
                   'duration': 0,
+                  'is_read': readIds.contains(id),
                   'chapter_index': id == 'one' ? 1 : 2
                 }
             ],
@@ -87,6 +102,8 @@ void main() {
       'downloaded and unknown-duration chapters can be marked and reopened',
       (tester) async {
     final app = _App();
+    app.user = User.fromJson({'id': 'user', 'username': 'reader'});
+    app.token = 'token';
     final player = _Player();
     final downloads = _Downloads(app);
     addTearDown(app.dispose);
@@ -118,6 +135,10 @@ void main() {
     await tester.tap(find.text('Mark as read'));
     await tester.pumpAndSettle();
     expect(find.text('Read'), findsNWidgets(2));
+    expect(app.client.mutations, ['/api/books/book/chapters/read-status']);
+    expect(app.client.readIds, {'one', 'two'});
+    await ChapterReadMarksStore()
+        .write('${app.serverUrl}:${app.fnId}:user:book', {});
     await tester.pumpWidget(page('second'));
     await tester.pumpAndSettle();
     await tester.scrollUntilVisible(find.text('Select chapters'), 300,

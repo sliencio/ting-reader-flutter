@@ -138,6 +138,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     appState.addListener(_onListeningConnectionChanged);
     _progress.journal.addListener(_notifyIfActive);
     unawaited(_progress.journal.initialize());
+    unawaited(appState.chapterReadSync.flush());
   }
 
   final AppState appState;

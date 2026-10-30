@@ -18,6 +18,7 @@ class _PlayerProgress {
     required this.onRemotePosition,
   }) {
     _retryTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (!_blocked) unawaited(appState.chapterReadSync.flush());
       if (!_blocked && journal.pendingCount > 0) unawaited(journal.flush());
       if (_wantSocket && _socket == null) _scheduleReconnect();
     });

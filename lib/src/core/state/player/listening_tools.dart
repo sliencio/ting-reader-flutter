@@ -112,6 +112,15 @@ extension ListeningTools on PlayerState {
     if (duration > 0 && _furthestChapterPosition < duration - outro - 2) return;
     final key = '$_currentResumeIdentity:${chapter.id}';
     if (!_finishedChapters.add(key)) return;
+    final book = currentBook;
+    if (book != null) {
+      unawaited(appState.chapterReadSync
+          .mark(book.id, [chapter.id])
+          .then((_) => appState.chapterReadSync.flush())
+          .catchError((Object failure) {
+            debugPrint('同步章节已读失败：$failure');
+          }));
+    }
     unawaited(downloadState
         .markChapterPlayed(chapter.id)
         .catchError((Object failure) {
@@ -122,6 +131,7 @@ extension ListeningTools on PlayerState {
   void _onListeningConnectionChanged() {
     if (_disposed) return;
     unawaited(_progress.journal.flush());
+    unawaited(appState.chapterReadSync.flush());
     _notifyIfActive();
   }
 

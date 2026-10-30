@@ -59,8 +59,9 @@ class _ChapterSectionState extends State<_ChapterSection> {
   final Set<String> _selectedIds = {};
   final Map<int, GlobalKey> _groupKeys = {};
   bool _selectionMode = false;
-  final _readMarks = ChapterReadMarksStore();
+  ChapterReadSync? _readSync;
   Set<String> _manuallyReadIds = {};
+  Set<String> _pendingReadIds = {};
   String? _readIdentity;
   bool _marksReady = false;
   bool _savingReadMarks = false;
@@ -76,20 +77,59 @@ class _ChapterSectionState extends State<_ChapterSection> {
     final identity =
         '${app.serverUrl}:${app.fnId}:${app.user?.id}:${widget.book.id}';
     if (_readIdentity == identity) return;
+    _readSync?.removeListener(_onReadSyncChanged);
+    _readSync = app.chapterReadSync..addListener(_onReadSyncChanged);
+    _readSync!
+        .acceptSnapshot(widget.book.id, widget.chapters.map((item) => item.id));
     _readIdentity = identity;
     _marksReady = false;
     _savingReadMarks = false;
     _manuallyReadIds = {};
+    _pendingReadIds = {};
     try {
-      final ids = await _readMarks.read(identity);
+      await _readSync!.migrate(widget.book.id);
       if (!mounted || _readIdentity != identity) return;
       setState(() {
-        _manuallyReadIds = ids;
         _marksReady = true;
       });
+      _onReadSyncChanged();
+      await _readSync!.flush();
     } catch (_) {
-      // 本地标记不可用时仍允许浏览、播放和下载章节。
+      // 同步失败不影响浏览、播放和下载，待同步标记会继续保留。
     }
+  }
+
+  void _onReadSyncChanged() {
+    if (!mounted) return;
+    setState(() {
+      _pendingReadIds = _readSync!.pendingFor(widget.book.id);
+      _manuallyReadIds = _readSync!.confirmedFor(widget.book.id);
+    });
+  }
+
+  Future<void> _retryReadMarks() async {
+    final identity = _readIdentity;
+    setState(() => _savingReadMarks = true);
+    try {
+      await _readSync!.flush();
+      if (mounted && identity == _readIdentity && _readSync!.error != null) {
+        _showDownloadMessage(_readSync!.error!);
+      }
+    } catch (failure) {
+      if (mounted && identity == _readIdentity) {
+        _showDownloadMessage(ApiError.messageFor(failure));
+      }
+    } finally {
+      if (mounted && identity == _readIdentity) {
+        setState(() => _savingReadMarks = false);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _readSync?.removeListener(_onReadSyncChanged);
+    super.dispose();
   }
 
   Future<void> _markSelectedRead() async {
@@ -101,19 +141,22 @@ class _ChapterSectionState extends State<_ChapterSection> {
       return;
     }
     final selected = Set<String>.of(_selectedIds);
-    final next = {..._manuallyReadIds, ...selected};
     setState(() => _savingReadMarks = true);
     try {
-      await _readMarks.write(identity, next);
+      await _readSync!.mark(widget.book.id, selected);
+      await _readSync!.flush();
       if (!mounted || identity != _readIdentity) return;
       setState(() {
-        _manuallyReadIds = next;
         _selectedIds.clear();
         _selectionMode = false;
       });
-      _showDownloadMessage(context.localeText(
-          '已在本机标记 ${selected.length} 个章节为已读',
-          'Marked ${selected.length} chapters as read on this device'));
+      final pending = selected.intersection(_pendingReadIds).length;
+      _showDownloadMessage(pending == 0
+          ? context.localeText('已同步 ${selected.length} 个章节为已读',
+              'Synced ${selected.length} read chapters')
+          : _readSync!.error ??
+              context.localeText('已保存，$pending 个章节待联网同步',
+                  'Saved; $pending chapters waiting to sync'));
     } catch (error) {
       if (mounted && identity == _readIdentity) {
         _showDownloadMessage(ApiError.messageFor(error));
@@ -129,6 +172,14 @@ class _ChapterSectionState extends State<_ChapterSection> {
   void didUpdateWidget(covariant _ChapterSection oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.book.id != widget.book.id) _loadReadMarks();
+    final previous = {
+      for (final chapter in oldWidget.chapters) chapter.id: chapter
+    };
+    if (widget.chapters.any((item) => !identical(previous[item.id], item))) {
+      _readSync?.acceptSnapshot(
+          widget.book.id, widget.chapters.map((item) => item.id));
+      _manuallyReadIds = _readSync?.confirmedFor(widget.book.id) ?? {};
+    }
     final visibleIds = widget.chapters.map((chapter) => chapter.id).toSet();
     _selectedIds.removeWhere((id) => !visibleIds.contains(id));
     if (oldWidget.activeTab != widget.activeTab ||
@@ -289,6 +340,18 @@ class _ChapterSectionState extends State<_ChapterSection> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (_pendingReadIds.isNotEmpty)
+            Row(children: [
+              Expanded(
+                  child: Text(context.localeText(
+                      '${_pendingReadIds.length} 个章节已读待同步',
+                      '${_pendingReadIds.length} read chapters waiting to sync'))),
+              TextButton.icon(
+                onPressed: _savingReadMarks ? null : _retryReadMarks,
+                icon: const Icon(Icons.sync_rounded, size: 18),
+                label: Text(context.localeText('重试同步', 'Retry sync')),
+              ),
+            ]),
           LayoutBuilder(
             builder: (context, constraints) {
               final compact = constraints.maxWidth < 560;
@@ -589,7 +652,9 @@ class _ChapterSectionState extends State<_ChapterSection> {
                       ),
                       child: _ChapterListRow(
                         chapter: displayChapters[i],
-                        manuallyRead:
+                        pendingRead:
+                            _pendingReadIds.contains(displayChapters[i].id),
+                        manuallyRead: displayChapters[i].isRead ||
                             _manuallyReadIds.contains(displayChapters[i].id),
                         active: widget.highlightedChapterId ==
                             displayChapters[i].id,

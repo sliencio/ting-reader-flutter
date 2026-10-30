@@ -11,6 +11,7 @@ class Chapter {
     this.isExtra = false,
     this.progressPosition,
     this.progressUpdatedAt,
+    this.isRead = false,
   });
 
   final String id;
@@ -22,6 +23,7 @@ class Chapter {
   final bool isExtra;
   final double? progressPosition;
   final String? progressUpdatedAt;
+  final bool isRead;
 
   factory Chapter.fromJson(Map<String, dynamic> json) {
     return Chapter(
@@ -35,6 +37,7 @@ class Chapter {
           (readBool(json, 'is_extra') ?? false),
       progressPosition: readDouble(json, 'progress_position'),
       progressUpdatedAt: readString(json, 'progress_updated_at'),
+      isRead: readBool(json, 'is_read') ?? false,
     );
   }
 
@@ -45,6 +48,7 @@ class Chapter {
     bool? isExtra,
     double? progressPosition,
     String? progressUpdatedAt,
+    bool? isRead,
   }) {
     return Chapter(
       id: id,
@@ -56,6 +60,7 @@ class Chapter {
       isExtra: isExtra ?? this.isExtra,
       progressPosition: progressPosition ?? this.progressPosition,
       progressUpdatedAt: progressUpdatedAt ?? this.progressUpdatedAt,
+      isRead: isRead ?? this.isRead,
     );
   }
 }

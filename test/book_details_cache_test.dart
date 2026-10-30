@@ -44,6 +44,30 @@ class _Api extends ApiClient {
 }
 
 void main() {
+  test('同步章节已读保留详情缓存和续播位置，不影响其他账号', () async {
+    final api = _Api();
+    final cache = BookDetailsCache();
+    for (final key in ['server:user:book', 'server:other:book']) {
+      final state = BookDetailState(api, 'book', cache: cache, cacheKey: key);
+      await state.load();
+      state.dispose();
+    }
+    final revision = cache.revision;
+    cache.markChaptersRead('server:user:book', {'chapter'});
+    final current = BookDetailState(api, 'book',
+        cache: cache, cacheKey: 'server:user:book');
+    final other = BookDetailState(api, 'book',
+        cache: cache, cacheKey: 'server:other:book');
+    addTearDown(current.dispose);
+    addTearDown(other.dispose);
+    expect(current.loading, isFalse);
+    expect(current.chapters.single.isRead, isTrue);
+    expect(current.progress?.position, 42);
+    expect(other.loading, isFalse);
+    expect(other.chapters.single.isRead, isFalse);
+    expect(cache.revision, revision);
+  });
+
   test('cached details display immediately while changed metadata refreshes',
       () async {
     final api = _Api();

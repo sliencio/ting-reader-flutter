@@ -16,6 +16,7 @@ import '../document_reader/document_reader.dart';
 import '../plugin_extensions/registry.dart';
 import '../models/models.dart';
 import '../services/session_monitor.dart';
+import '../services/chapter_read_sync.dart';
 import '../utils/client_device_headers.dart';
 import '../utils/application_time_zone.dart' as app_time_zone;
 import '../utils/locale.dart';
@@ -59,6 +60,13 @@ class AppState extends ChangeNotifier {
   }
 
   final ApiClient api = ApiClient();
+  late final ChapterReadSync chapterReadSync = ChapterReadSync(
+    api: api,
+    identity: () => '$serverUrl:$fnId:${user?.id}',
+    canSync: () => !_disposed && !offlineMode && user != null && token != null,
+    onSynced: (book, ids) =>
+        bookDetailsCache.markChaptersRead('$serverUrl:${user?.id}:$book', ids),
+  );
   late final PluginCapabilitiesApi pluginCapabilities =
       PluginCapabilitiesApi(api);
   late final DocumentReaderClient documentReader =
@@ -111,6 +119,7 @@ class AppState extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    chapterReadSync.dispose();
     _cancelDirectSessionRecovery();
     _sessionMonitor.dispose();
     if (_ownsFnConnect) fnConnect.dispose();

@@ -13,11 +13,13 @@ class _ChapterListRow extends StatefulWidget {
     required this.onPlay,
     required this.onDownload,
     this.manuallyRead = false,
+    this.pendingRead = false,
     this.task,
   });
 
   final Chapter chapter;
   final bool manuallyRead;
+  final bool pendingRead;
   final bool active;
   final bool playing;
   final Color? themeColor;
@@ -41,19 +43,21 @@ class _ChapterListRowState extends State<_ChapterListRow> {
     final progressPositionValue = widget.chapter.progressPosition;
     final compact = MediaQuery.sizeOf(context).width < 640;
     final metaColor = context.tertiaryText;
-    final progress = widget.manuallyRead
+    final progress = widget.manuallyRead || widget.pendingRead
         ? 1.0
         : progressPositionValue != null && widget.chapter.duration > 0
             ? (progressPositionValue / widget.chapter.duration).clamp(0.0, 1.0)
             : 0.0;
-    final progressText = widget.manuallyRead
-        ? context.localeText('已读', 'Read')
-        : progress >= 0.95
-            ? context.localeText('已播完', 'Completed')
-            : progress > 0
-                ? context.localeText('已播${(progress * 100).floor()}%',
-                    '${(progress * 100).floor()}% played')
-                : null;
+    final progressText = widget.pendingRead
+        ? context.localeText('已读·待同步', 'Read · Pending sync')
+        : widget.manuallyRead
+            ? context.localeText('已读', 'Read')
+            : progress >= 0.95
+                ? context.localeText('已播完', 'Completed')
+                : progress > 0
+                    ? context.localeText('已播${(progress * 100).floor()}%',
+                        '${(progress * 100).floor()}% played')
+                    : null;
     final themeColor = widget.themeColor;
     final themedActive = widget.active && themeColor != null && !context.isDark;
     final themeTextColor = themeColor != null && isBookThemeLight(themeColor)

@@ -296,6 +296,27 @@ class BookDetailsCache {
     _entries.clear();
     revision++;
   }
+
+  void markChaptersRead(String key, Set<String> ids) {
+    final saved = _entries[key];
+    if (saved == null) return;
+    _write(key, (
+      book: saved.book,
+      progress: saved.progress,
+      settings: saved.settings,
+      chapters: [
+        for (final chapter in saved.chapters)
+          ids.contains(chapter.id) ? chapter.copyWith(isRead: true) : chapter,
+      ],
+      total: saved.total,
+      mainTotal: saved.mainTotal,
+      extraTotal: saved.extraTotal,
+      tab: saved.tab,
+      group: saved.group,
+      ascending: saved.ascending,
+      groupsDescending: saved.groupsDescending,
+    ));
+  }
 }
 
 class BookDetailState extends ChangeNotifier {

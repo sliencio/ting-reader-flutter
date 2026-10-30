@@ -57,6 +57,7 @@ class PlaybackResumeRecord {
               'is_extra': item.isExtra,
               'progress_position': item.progressPosition,
               'progress_updated_at': item.progressUpdatedAt,
+              'is_read': item.isRead,
             },
         ],
         'chapter_id': chapterId,
