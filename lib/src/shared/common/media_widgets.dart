@@ -322,51 +322,59 @@ class _CoverImageState extends State<CoverImage> {
     );
   }
 
-  Widget _cachedImage(BuildContext context, String url,
-      Map<String, String> headers) {
+  Widget _cachedImage(
+      BuildContext context, String url, Map<String, String> headers) {
     final app = AppScope.appOf(context);
     final cache = app.coverCache;
     final ownOrigin = app.usesActiveOrigin(url);
-    final key = cache.key(app.bookCacheIdentity, url,
-        serverResource: ownOrigin);
+    final key =
+        cache.key(app.bookCacheIdentity, url, serverResource: ownOrigin);
     final version = app.coverCacheVersion;
     final request = '$key:$version:${cache.generation}';
     if (_cacheRequest != request) {
       _cacheRequest = request;
       _diskCover = cache.peek(key);
       // Requests use the current credentials; the persistent key excludes them.
-      _cachedCover = cache.load(key, () async {
-        final Response<dynamic> response;
-        if (ownOrigin) {
-          response = await app.api.getBytes(url);
-        } else {
-          final client = Dio(BaseOptions(
-            connectTimeout: const Duration(seconds: 12),
-            receiveTimeout: const Duration(seconds: 30),
-          ));
-          try {
-            response = await client.get<List<int>>(url,
-                options: Options(responseType: ResponseType.bytes),
-            );
-          } finally {
-            client.close();
-          }
-        }
-        final bytes = List<int>.from(response.data as List);
-        // A gateway login page must never become a cached cover.
-        final codec = await ui.instantiateImageCodec(Uint8List.fromList(bytes));
-        try {
-          final frame = await codec.getNextFrame();
-          frame.image.dispose();
-        } finally {
-          codec.dispose();
-        }
-        return bytes;
-      }, version: version, onCached: (file) {
-        if (mounted && _cacheRequest == request && _diskCover?.path != file.path) {
-          setState(() => _diskCover = file);
-        }
-      });
+      _cachedCover = cache.load(
+          key,
+          () async {
+            final Response<dynamic> response;
+            if (ownOrigin) {
+              response = await app.api.getBytes(url);
+            } else {
+              final client = Dio(BaseOptions(
+                connectTimeout: const Duration(seconds: 12),
+                receiveTimeout: const Duration(seconds: 30),
+              ));
+              try {
+                response = await client.get<List<int>>(
+                  url,
+                  options: Options(responseType: ResponseType.bytes),
+                );
+              } finally {
+                client.close();
+              }
+            }
+            final bytes = List<int>.from(response.data as List);
+            // A gateway login page must never become a cached cover.
+            final codec =
+                await ui.instantiateImageCodec(Uint8List.fromList(bytes));
+            try {
+              final frame = await codec.getNextFrame();
+              frame.image.dispose();
+            } finally {
+              codec.dispose();
+            }
+            return bytes;
+          },
+          version: version,
+          onCached: (file) {
+            if (mounted &&
+                _cacheRequest == request &&
+                _diskCover?.path != file.path) {
+              setState(() => _diskCover = file);
+            }
+          });
     }
     return FutureBuilder<File?>(
       key: ValueKey(request),
@@ -390,23 +398,24 @@ class _CoverImageState extends State<CoverImage> {
     );
   }
 
-  Widget _networkImage(BuildContext context, String url,
-      Map<String, String> headers) => Image.network(
-                  url,
-                  key: ValueKey('$url:$_retryEpoch'),
-                  headers: headers.isEmpty ? null : headers,
-                  fit: widget.fit,
-                  width: double.infinity,
-                  height: double.infinity,
-                  errorBuilder: (context, error, stackTrace) {
-                    _recoverRedirectAndRetry(url);
-                    return _placeholder(context, loading: _recoveringRedirect);
-                  },
-                  loadingBuilder: (context, child, progress) {
-                    if (progress == null) return child;
-                    return _placeholder(context, loading: true);
-                  },
-                );
+  Widget _networkImage(
+          BuildContext context, String url, Map<String, String> headers) =>
+      Image.network(
+        url,
+        key: ValueKey('$url:$_retryEpoch'),
+        headers: headers.isEmpty ? null : headers,
+        fit: widget.fit,
+        width: double.infinity,
+        height: double.infinity,
+        errorBuilder: (context, error, stackTrace) {
+          _recoverRedirectAndRetry(url);
+          return _placeholder(context, loading: _recoveringRedirect);
+        },
+        loadingBuilder: (context, child, progress) {
+          if (progress == null) return child;
+          return _placeholder(context, loading: true);
+        },
+      );
 
   void _recoverRedirectAndRetry(String url) {
     if (_recoveringRedirect || _failedUrl == url) return;

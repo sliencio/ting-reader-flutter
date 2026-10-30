@@ -99,8 +99,9 @@ void main() {
       expect(restored.loading, isFalse);
       expect(restored.books.single.title, '原书籍');
       final metadata = cache.book('NAS:reader', 'book')!;
-      final detail = BookDetailState(api, 'book', initialBook:
-          Book.fromJson({...metadata, 'path': path, 'description': '本地简介'}));
+      final detail = BookDetailState(api, 'book',
+          initialBook: Book.fromJson(
+              {...metadata, 'path': path, 'description': '本地简介'}));
       addTearDown(detail.dispose);
       expect(detail.loading, isFalse);
       expect(detail.book?.path, path);

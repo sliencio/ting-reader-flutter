@@ -435,8 +435,8 @@ void main() {
       expect(notifications.states.last['systemActions'],
           contains(toggleAction.index));
       notifications.clickHeadset();
-      await waitForPlayback(() =>
-          player.isPlaying && native.playCount == cycle + 2);
+      await waitForPlayback(
+          () => player.isPlaying && native.playCount == cycle + 2);
     }
   });
 

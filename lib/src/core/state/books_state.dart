@@ -300,22 +300,28 @@ class BookDetailsCache {
           final saved = asMap(entry.value);
           final book = Book.fromJson(asMap(saved['book']));
           if (book.id.isEmpty) continue;
-          _entries.putIfAbsent(entry.key, () => (
-            book: book,
-            progress: saved['progress'] == null ? null
-                : ProgressItem.fromJson(asMap(saved['progress'])),
-            settings: asMap(saved['settings']),
-            chapters: asMapList(saved['chapters']).map(Chapter.fromJson).toList(),
-            total: saved['total'] as int,
-            mainTotal: saved['main_total'] as int,
-            extraTotal: saved['extra_total'] as int,
-            tab: saved['tab'] as String,
-            group: saved['group'] as int,
-            ascending: saved['ascending'] as bool,
-            groupsDescending: saved['groups_descending'] as bool,
-            serverRevision: saved['server_revision'] == null ? null
-                : asMap(saved['server_revision']),
-          ));
+          _entries.putIfAbsent(
+              entry.key,
+              () => (
+                    book: book,
+                    progress: saved['progress'] == null
+                        ? null
+                        : ProgressItem.fromJson(asMap(saved['progress'])),
+                    settings: asMap(saved['settings']),
+                    chapters: asMapList(saved['chapters'])
+                        .map(Chapter.fromJson)
+                        .toList(),
+                    total: saved['total'] as int,
+                    mainTotal: saved['main_total'] as int,
+                    extraTotal: saved['extra_total'] as int,
+                    tab: saved['tab'] as String,
+                    group: saved['group'] as int,
+                    ascending: saved['ascending'] as bool,
+                    groupsDescending: saved['groups_descending'] as bool,
+                    serverRevision: saved['server_revision'] == null
+                        ? null
+                        : asMap(saved['server_revision']),
+                  ));
         } catch (_) {
           // One damaged book must not discard the other entries.
         }
@@ -329,34 +335,38 @@ class BookDetailsCache {
 
   void _persist() {
     final snapshot = jsonEncode({
-      for (final entry in _entries.entries) entry.key: {
-        'book': entry.value.book.toJson(),
-        'chapters': entry.value.chapters.map((item) => item.toJson()).toList(),
-        'progress': entry.value.progress == null ? null : {
-          'id': entry.value.progress!.id,
-          'book_id': entry.value.progress!.bookId,
-          'chapter_id': entry.value.progress!.chapterId,
-          'position': entry.value.progress!.position,
-          'duration': entry.value.progress!.duration,
-          'updated_at': entry.value.progress!.updatedAt,
-          'revision': entry.value.progress!.revision,
+      for (final entry in _entries.entries)
+        entry.key: {
+          'book': entry.value.book.toJson(),
+          'chapters':
+              entry.value.chapters.map((item) => item.toJson()).toList(),
+          'progress': entry.value.progress == null
+              ? null
+              : {
+                  'id': entry.value.progress!.id,
+                  'book_id': entry.value.progress!.bookId,
+                  'chapter_id': entry.value.progress!.chapterId,
+                  'position': entry.value.progress!.position,
+                  'duration': entry.value.progress!.duration,
+                  'updated_at': entry.value.progress!.updatedAt,
+                  'revision': entry.value.progress!.revision,
+                },
+          // Details only need presentation/order preferences, never credentials.
+          'settings': {
+            for (final setting in entry.value.settings.entries)
+              if (setting.key.startsWith('bookshelf_') ||
+                  setting.key == 'chapter_group_orders')
+                setting.key: setting.value,
+          },
+          'total': entry.value.total,
+          'main_total': entry.value.mainTotal,
+          'extra_total': entry.value.extraTotal,
+          'tab': entry.value.tab,
+          'group': entry.value.group,
+          'ascending': entry.value.ascending,
+          'groups_descending': entry.value.groupsDescending,
+          'server_revision': entry.value.serverRevision,
         },
-        // Details only need presentation/order preferences, never credentials.
-        'settings': {
-          for (final setting in entry.value.settings.entries)
-            if (setting.key.startsWith('bookshelf_') ||
-                setting.key == 'chapter_group_orders')
-              setting.key: setting.value,
-        },
-        'total': entry.value.total,
-        'main_total': entry.value.mainTotal,
-        'extra_total': entry.value.extraTotal,
-        'tab': entry.value.tab,
-        'group': entry.value.group,
-        'ascending': entry.value.ascending,
-        'groups_descending': entry.value.groupsDescending,
-        'server_revision': entry.value.serverRevision,
-      },
     });
     _saving = _saving.then((_) async {
       final prefs = await SharedPreferences.getInstance();

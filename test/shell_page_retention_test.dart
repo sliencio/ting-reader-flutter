@@ -34,22 +34,33 @@ class _Api extends ApiClient {
       {Map<String, dynamic>? params, CancelToken? cancelToken}) async {
     requests.add(path);
     if (bookPath != null) {
-      final book = {'id': 'cached-book', 'library_id': 'library',
-        'title': 'Cached book', 'path': bookPath, 'library_type': 'local'};
+      final book = {
+        'id': 'cached-book',
+        'library_id': 'library',
+        'title': 'Cached book',
+        'path': bookPath,
+        'library_type': 'local'
+      };
       final dynamic cachedData = switch (path) {
         '/api/books' => [book],
         '/api/books/cached-book' => book,
         '/api/books/cached-book/revision' => {
-          'instance': 'test', 'content_revision': 1,
-          'reading_revision': 0, 'progress_revision': 0,
-        },
+            'instance': 'test',
+            'content_revision': 1,
+            'reading_revision': 0,
+            'progress_revision': 0,
+          },
         '/api/books/cached-book/chapters' => {
-          'chapters': [], 'total': 0, 'main_total': 0, 'extra_total': 0,
-        },
+            'chapters': [],
+            'total': 0,
+            'main_total': 0,
+            'extra_total': 0,
+          },
         _ => null,
       };
       if (cachedData != null) {
-        return Response(requestOptions: RequestOptions(path: path), data: cachedData);
+        return Response(
+            requestOptions: RequestOptions(path: path), data: cachedData);
       }
     }
     return Response(
@@ -192,17 +203,21 @@ void main() {
     testWidgets('iPhone进入书籍再返回保留书架，不重复加载：$path', (tester) async {
       debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
-      final (app, _) = await _pump(tester, const Size(390, 844), bookPath: path);
+      final (app, _) =
+          await _pump(tester, const Size(390, 844), bookPath: path);
       final shelf = tester.state(find.byType(BookshelfPage));
-      final count = app.client.requests.where((path) => path == '/api/books').length;
+      final count =
+          app.client.requests.where((path) => path == '/api/books').length;
       await tester.tap(find.text('Cached book'));
       await tester.pumpAndSettle();
       expect(find.byType(BookDetailPage), findsOneWidget);
       await tester.tap(find.text('Back').first);
       await tester.pumpAndSettle();
-      expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
+      expect(
+          identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
       expect(find.text('Cached book'), findsOneWidget);
-      expect(app.client.requests.where((path) => path == '/api/books').length, count);
+      expect(app.client.requests.where((path) => path == '/api/books').length,
+          count);
       expect(tester.takeException(), isNull);
     });
   }

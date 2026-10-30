@@ -24,7 +24,8 @@ class CoverCache {
     final uri = Uri.parse(url);
     final params = Map<String, String>.of(uri.queryParameters);
     if (serverResource) params.remove('token');
-    final source = uri.replace(queryParameters: params, fragment: '').toString();
+    final source =
+        uri.replace(queryParameters: params, fragment: '').toString();
     // Gateway relay/LAN addresses and renewed tokens identify the same cover.
     final resource = serverResource
         ? Uri(path: uri.path, queryParameters: params).toString()
@@ -62,7 +63,8 @@ class CoverCache {
     File? cached;
     try {
       await _clearing;
-      if (generation != _generation || _latestRequests[key] != requestKey) return null;
+      if (generation != _generation || _latestRequests[key] != requestKey)
+        return null;
       final root = Directory('${(await _directory()).path}/book_covers_v1');
       await root.create(recursive: true);
       final manifest = File('${root.path}/$key.json');
@@ -75,17 +77,20 @@ class CoverCache {
             cached = candidate;
             if (generation != _generation) return null;
             _remember(key, candidate);
-            final age = DateTime.now().difference(await manifest.lastModified());
-            if (age < maxAge && (version.isEmpty || saved['version'] == version)) {
+            final age =
+                DateTime.now().difference(await manifest.lastModified());
+            if (age < maxAge &&
+                (version.isEmpty || saved['version'] == version)) {
               return candidate;
             }
           }
         }
-      } catch (_) { /* Missing or corrupt cache: fetch a fresh image. */ }
+      } catch (_) {/* Missing or corrupt cache: fetch a fresh image. */}
       try {
         final bytes = await fetch();
         if (bytes.isEmpty || bytes.length > 10 * 1024 * 1024) return cached;
-        if (generation != _generation || _latestRequests[key] != requestKey) return null;
+        if (generation != _generation || _latestRequests[key] != requestKey)
+          return null;
         final digest = sha256.convert(bytes).toString();
         final file = File('${root.path}/$key.$digest.img');
         if (!await file.exists()) {
@@ -97,9 +102,13 @@ class CoverCache {
           }
           await temporary.rename(file.path);
         }
-        await manifest.writeAsString(jsonEncode({'digest': digest, 'version': version}));
-        if (generation != _generation || _latestRequests[key] != requestKey) return null;
-        if (cached != null && cached.path != file.path && await cached.exists()) {
+        await manifest
+            .writeAsString(jsonEncode({'digest': digest, 'version': version}));
+        if (generation != _generation || _latestRequests[key] != requestKey)
+          return null;
+        if (cached != null &&
+            cached.path != file.path &&
+            await cached.exists()) {
           await cached.delete();
         }
         _remember(key, file);
@@ -126,7 +135,8 @@ class CoverCache {
     _files.remove(key);
     _files[key] = file;
     if (_files.length > 512) _files.remove(_files.keys.first);
-    for (final listener in List.of(_listeners[key] ?? <void Function(File)>[])) {
+    for (final listener
+        in List.of(_listeners[key] ?? <void Function(File)>[])) {
       listener(file);
     }
   }

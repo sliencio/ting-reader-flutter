@@ -21,15 +21,21 @@ void main() {
         'http://192.168.1.10/api/proxy/cover?path=book.jpg&token=new',
         serverResource: true);
     expect(first, second);
-    expect(cache.key('other:reader',
-        'https://relay.example/api/proxy/cover?path=book.jpg&token=old',
-        serverResource: true), isNot(first));
+    expect(
+        cache.key('other:reader',
+            'https://relay.example/api/proxy/cover?path=book.jpg&token=old',
+            serverResource: true),
+        isNot(first));
   });
 
   test('并发读取合并请求，重启后从磁盘读取封面且不访问STRM来源', () async {
     final gate = Completer<List<int>>();
     var requests = 0;
-    Future<List<int>> fetch() { requests++; return gate.future; }
+    Future<List<int>> fetch() {
+      requests++;
+      return gate.future;
+    }
+
     final first = cache.load('cover', fetch, version: '1');
     final second = cache.load('cover', fetch, version: '1');
     gate.complete([1, 2, 3]);
@@ -48,8 +54,8 @@ void main() {
     final updated = await cache.load('cover', () async => [2], version: '2');
     expect(updated?.path, isNot(old?.path));
     expect(await updated!.readAsBytes(), [2]);
-    final offline = await cache.load('cover', () async => throw StateError('离线'),
-        version: '3');
+    final offline = await cache
+        .load('cover', () async => throw StateError('离线'), version: '3');
     expect(await offline!.readAsBytes(), [2]);
   });
 
@@ -58,8 +64,8 @@ void main() {
     cache = CoverCache(directory: () async => directory);
     final cached = Completer<File>();
     final gate = Completer<List<int>>();
-    final refresh = cache.load('cover', () => gate.future,
-        version: '2', onCached: (file) {
+    final refresh =
+        cache.load('cover', () => gate.future, version: '2', onCached: (file) {
       if (!cached.isCompleted) cached.complete(file);
     });
     expect(await (await cached.future).readAsBytes(), [1]);
