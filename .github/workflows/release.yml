@@ -361,12 +361,16 @@ jobs:
               raise SystemExit(f"{version} 的更新说明不能为空")
           Path("release-notes.md").write_text(notes + "\n", encoding="utf-8")
           PY
-      - name: 创建独立版本的 Release
+      - name: 发布安装包
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          gh release create "$RELEASE_TAG" dist/* \
-            --verify-tag \
-            --title "Ting Reader Flutter $RELEASE_TAG" \
-            --notes-file release-notes.md
+          if [[ "$RELEASE_TAG" == "v1.5.3" ]] && gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* --clobber
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --verify-tag \
+              --title "Ting Reader Flutter $RELEASE_TAG" \
+              --notes-file release-notes.md
+          fi
