@@ -106,6 +106,16 @@ class _NativeNotifications {
     states.clear();
   }
 
+  void clickHeadset() {
+    binding.channelBuffers.push(
+      _handler.name,
+      const StandardMethodCodec().encodeMethodCall(
+        const MethodCall('click', {'button': 0}),
+      ),
+      (_) {},
+    );
+  }
+
   void uninstall() {
     for (final channel in [_client, _handler]) {
       binding.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
@@ -407,6 +417,28 @@ void main() {
     unawaited(player.playChapter(book, [item], item));
     await waitForPlayback(() => native.playCount == 1 && player.isPlaying);
   }
+
+  test('Apple headset toggle remains enabled after pause and resume', () async {
+    await startFocusPlayback();
+    // iOS builds the command enable mask from controls and systemActions.
+    // The headset toggle has its own action, separate from play and pause.
+    const toggleAction = MediaActionMessage.playPause;
+    for (var cycle = 0; cycle < 2; cycle++) {
+      await waitForPlayback(() =>
+          notifications.states.isNotEmpty &&
+          notifications.states.last['playing'] == true);
+      expect(notifications.states.last['systemActions'],
+          contains(toggleAction.index));
+      notifications.clickHeadset();
+      await waitForPlayback(() =>
+          !player.isPlaying && notifications.states.last['playing'] == false);
+      expect(notifications.states.last['systemActions'],
+          contains(toggleAction.index));
+      notifications.clickHeadset();
+      await waitForPlayback(() =>
+          player.isPlaying && native.playCount == cycle + 2);
+    }
+  });
 
   String resumeIdentity() => '${app.serverUrl}:${app.fnId}:${app.user?.id}';
 
