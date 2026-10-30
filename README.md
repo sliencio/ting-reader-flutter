@@ -30,10 +30,13 @@
 
 ```bash
 flutter pub get --enforce-lockfile
+dart format --output=none --set-exit-if-changed lib test
 flutter analyze --no-fatal-infos
 flutter test --no-pub
 flutter run
 ```
+
+提交或发布前，可运行 `bash scripts/check.sh` 完成本地依赖、格式、静态分析与全量测试，检查项与 GitHub Actions 一致。任一步失败都会立即退出。
 
 各平台的环境要求、打包命令和输出位置见 [本地打包说明](scripts/README.md)。跨平台传输源码时，请保留 `third_party/` 目录。
 

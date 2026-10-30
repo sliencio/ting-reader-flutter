@@ -201,8 +201,6 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
   for (final path in ['/nas/book/chapter.mp3', '/nas/book/chapter.strm']) {
     testWidgets('iPhone进入书籍再返回保留书架，不重复加载：$path', (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
-      addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final (app, _) =
           await _pump(tester, const Size(390, 844), bookPath: path);
       final shelf = tester.state(find.byType(BookshelfPage));
@@ -219,7 +217,7 @@ void main() {
       expect(app.client.requests.where((path) => path == '/api/books').length,
           count);
       expect(tester.takeException(), isNull);
-    });
+    }, variant: TargetPlatformVariant.only(TargetPlatform.iOS));
   }
   for (final platform in [
     TargetPlatform.android,

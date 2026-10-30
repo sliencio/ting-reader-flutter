@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -9,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:ting_reader_flutter/l10n/app_localizations.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/models/models.dart';
+import 'package:ting_reader_flutter/src/core/services/cover_cache.dart';
 import 'package:ting_reader_flutter/src/core/state/app_state.dart';
 import 'package:ting_reader_flutter/src/core/state/books_state.dart';
 import 'package:ting_reader_flutter/src/core/state/scrape_state.dart';
@@ -141,10 +143,22 @@ class _CoverApi extends ApiClient {
   }
 }
 
+// Upload/editor tests exercise requests and selections. Disk image caching is
+// verified separately in cover_cache_test.dart, outside the widget fake clock.
+class _UncachedCovers extends CoverCache {
+  @override
+  Future<File?> load(String key, Future<List<int>> Function() fetch,
+          {String version = '', void Function(File)? onCached}) async =>
+      null;
+}
+
 class _CoverApp extends AppState {
   final _coverApi = _CoverApi();
+  final _covers = _UncachedCovers();
   @override
   _CoverApi get api => _coverApi;
+  @override
+  CoverCache get coverCache => _covers;
 }
 
 class _CoverPlayer extends ChangeNotifier implements PlayerState {

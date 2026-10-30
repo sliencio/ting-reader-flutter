@@ -63,8 +63,9 @@ class CoverCache {
     File? cached;
     try {
       await _clearing;
-      if (generation != _generation || _latestRequests[key] != requestKey)
+      if (generation != _generation || _latestRequests[key] != requestKey) {
         return null;
+      }
       final root = Directory('${(await _directory()).path}/book_covers_v1');
       await root.create(recursive: true);
       final manifest = File('${root.path}/$key.json');
@@ -89,8 +90,9 @@ class CoverCache {
       try {
         final bytes = await fetch();
         if (bytes.isEmpty || bytes.length > 10 * 1024 * 1024) return cached;
-        if (generation != _generation || _latestRequests[key] != requestKey)
+        if (generation != _generation || _latestRequests[key] != requestKey) {
           return null;
+        }
         final digest = sha256.convert(bytes).toString();
         final file = File('${root.path}/$key.$digest.img');
         if (!await file.exists()) {
@@ -104,8 +106,9 @@ class CoverCache {
         }
         await manifest
             .writeAsString(jsonEncode({'digest': digest, 'version': version}));
-        if (generation != _generation || _latestRequests[key] != requestKey)
+        if (generation != _generation || _latestRequests[key] != requestKey) {
           return null;
+        }
         if (cached != null &&
             cached.path != file.path &&
             await cached.exists()) {

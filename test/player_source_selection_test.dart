@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:audio_session/audio_session.dart';
+import 'package:audio_service/audio_service.dart' as audio_service;
 import 'package:audio_service_platform_interface/audio_service_platform_interface.dart';
 import 'package:audio_service_platform_interface/method_channel_audio_service.dart';
 import 'package:dio/dio.dart';
@@ -10,6 +11,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 import 'package:ting_reader_flutter/src/core/services/playback_resume_store.dart';
 import 'package:ting_reader_flutter/src/core/services/playback_skip_store.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
@@ -347,6 +349,8 @@ void main() {
   bool playerDisposed = false;
   final notifications = _NativeNotifications(binding);
   const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+  const artworkDatabase = MethodChannel('com.tekartik.sqflite');
+  var backgroundInitialized = false;
   late Directory cacheDirectory;
 
   Chapter chapter(String path, {String id = 'chapter', int index = 0}) =>
@@ -381,15 +385,48 @@ void main() {
     AudioServicePlatform.instance = MethodChannelAudioService();
     cacheDirectory =
         await Directory.systemTemp.createTemp('ting-player-notification-');
+    // macOS uses SQLite for notification artwork; no native plugins run here.
+    databaseFactory = databaseFactorySqflitePlugin;
+    binding.defaultBinaryMessenger.setMockMethodCallHandler(artworkDatabase,
+        (call) async {
+      switch (call.method) {
+        case 'getDatabasesPath':
+          return cacheDirectory.path;
+        case 'openDatabase':
+          return {'id': 1};
+        case 'query':
+          final sql = (call.arguments as Map)['sql'] as String;
+          return sql.contains('user_version')
+              ? {
+                  'columns': ['user_version'],
+                  'rows': [
+                    [3]
+                  ]
+                }
+              : {'columns': [], 'rows': []};
+        case 'execute':
+        case 'closeDatabase':
+        case 'options':
+          return null;
+        default:
+          throw StateError('Unexpected artwork database call: ${call.method}');
+      }
+    });
     binding.defaultBinaryMessenger.setMockMethodCallHandler(
         pathProvider, (_) async => cacheDirectory.path);
     notifications.install();
     await JustAudioBackground.init();
+    backgroundInitialized = true;
   });
 
   tearDownAll(() async {
+    if (backgroundInitialized) {
+      await audio_service.AudioService.cacheManager.dispose();
+    }
     notifications.uninstall();
     binding.defaultBinaryMessenger.setMockMethodCallHandler(pathProvider, null);
+    binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(artworkDatabase, null);
     await cacheDirectory.delete(recursive: true);
   });
 
