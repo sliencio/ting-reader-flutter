@@ -11,6 +11,7 @@ import 'package:ting_reader_flutter/src/features/admin/users/admin_users_page.da
 import 'package:ting_reader_flutter/src/features/player/desktop_window_host.dart';
 import 'package:ting_reader_flutter/l10n/app_localizations.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
+import 'package:ting_reader_flutter/src/core/services/listening_progress_sync.dart';
 import 'package:ting_reader_flutter/src/core/models/models.dart';
 import 'package:ting_reader_flutter/src/core/state/app_state.dart';
 import 'package:ting_reader_flutter/src/core/state/download_state.dart';
@@ -19,7 +20,9 @@ import 'package:ting_reader_flutter/src/features/app_shell.dart';
 import 'package:ting_reader_flutter/src/features/bookshelf/bookshelf_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/downloads_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/about_update_dialog.dart';
+import 'package:ting_reader_flutter/src/features/player/mini_player.dart';
 import 'package:ting_reader_flutter/src/shared/app_scope.dart';
+import 'package:ting_reader_flutter/src/shared/common/media_widgets.dart';
 
 class _Api extends ApiClient {
   final requests = <String>[];
@@ -46,18 +49,70 @@ class _App extends AppState {
 }
 
 class _Player extends ChangeNotifier implements PlayerState {
+  Book? book;
+  Chapter? chapter;
+  bool expanded = false;
+  bool playing = false;
+  double position = 20;
+  int toggles = 0;
+  @override
+  final progressSync = ListeningProgressSync(
+      api: _Api(), identity: () => 'reader', canSync: () => false);
+  @override
+  Chapter? get currentChapter => chapter;
+  @override
+  double get currentTime => position;
+  @override
+  double get duration => 600;
+  @override
+  double get playbackSpeed => 1;
+  @override
+  double get volume => 1;
+  @override
+  bool get isPlaying => playing;
+  @override
+  bool get isLoading => false;
+  @override
+  String? get playbackStatus => null;
+  @override
+  int? get sleepRemainingSeconds => null;
+  @override
+  int? get sleepEpisodesRemaining => null;
   @override
   int get smartRewindSeconds => 10;
   @override
-  Book? get currentBook => null;
+  Book? get currentBook => book;
   @override
   bool get isMiniCollapsed => false;
   @override
-  bool get hasChapter => false;
+  bool get hasChapter => book != null && chapter != null;
   @override
-  bool get isExpanded => false;
+  bool get isExpanded => expanded;
   @override
-  void setExpanded(bool value) {}
+  void setExpanded(bool value) {
+    expanded = value;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> seek(double value) async {
+    position = value;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> togglePlay() async {
+    playing = !playing;
+    toggles++;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    progressSync.dispose();
+    super.dispose();
+  }
+
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
@@ -378,13 +433,73 @@ void main() {
     final revision = app.bookDetailsCache.revision;
     await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    await _select(tester, 'Force refresh');
+    expect(find.byTooltip('Force refresh'), findsNothing);
+    await _select(tester, 'About Ting Reader');
+    final refresh = find.widgetWithText(OutlinedButton, 'Force refresh');
+    await tester.ensureVisible(refresh);
+    await tester.pumpAndSettle();
+    await tester.tap(refresh);
+    await tester.pumpAndSettle();
     expect(app.bookDetailsCache.revision, revision + 1);
     expect(find.byType(SnackBar), findsNothing);
     await _select(tester, 'Bookshelf');
     expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isFalse);
     expect(tester.takeException(), isNull);
   });
+
+  for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
+    testWidgets('$platform 展开播放详情后可左滑收起菜单，进度条仍可拖动', (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final (_, player) = await _pump(tester, const Size(390, 844));
+      player.book = Book.fromJson({'id': 'book', 'title': '收听中的书籍'});
+      player.chapter = Chapter.fromJson({
+        'id': 'chapter',
+        'book_id': 'book',
+        'title': '当前章节',
+        'duration': 600,
+      });
+      player.notifyListeners();
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Settings'));
+      await tester.pumpAndSettle();
+      await tester.tap(find
+          .descendant(
+              of: find.byType(MiniPlayer), matching: find.byType(CoverImage))
+          .first);
+      await tester.pumpAndSettle();
+      expect(player.isExpanded, isTrue);
+      final overlay = tester.element(find.byType(ExpandedPlayerOverlay));
+      final slider = find.descendant(
+          of: find.byType(ExpandedPlayerOverlay),
+          matching: find.byType(Slider));
+      await tester.ensureVisible(slider);
+      await tester.pumpAndSettle();
+      await tester.drag(slider, const Offset(80, 0));
+      await tester.pumpAndSettle();
+      expect(player.position, greaterThan(20));
+      expect(find.byTooltip('Close settings').hitTestable(), findsOneWidget);
+      await tester.dragFrom(const Offset(260, 130), const Offset(-160, 0));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Close settings').hitTestable(), findsNothing);
+      expect(player.isExpanded, isTrue);
+      expect(
+          identical(
+              tester.element(find.byType(ExpandedPlayerOverlay)), overlay),
+          isTrue);
+      await tester.dragFrom(const Offset(100, 130), const Offset(160, 0));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('Close settings').hitTestable(), findsNothing);
+      final play = find.byIcon(Icons.play_arrow_rounded);
+      await tester.ensureVisible(play);
+      await tester.pumpAndSettle();
+      await tester.tap(play);
+      await tester.pumpAndSettle();
+      expect(player.toggles, 1);
+      expect(tester.takeException(), isNull);
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
 
   for (final size in [const Size(320, 568), const Size(1440, 1000)]) {
     testWidgets('打开关于不刷新或清除缓存，版本加载失败不影响页面 $size', (tester) async {

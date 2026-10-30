@@ -22,61 +22,32 @@ class ListeningSettingsPage extends StatefulWidget {
     this.pluginPages = const [],
     this.onOpenPluginPage,
     this.activePluginPageId,
-    required this.forceRefresh,
     this.embedded = false,
     this.navigation,
     this.compact = false,
     this.currentDestination,
-    this.showMessage,
   });
 
   final ValueChanged<AppDestination> go;
   final List<ClientExtensionDescriptor> pluginPages;
   final ValueChanged<ClientExtensionDescriptor>? onOpenPluginPage;
   final String? activePluginPageId;
-  final Future<void> Function() forceRefresh;
   final bool embedded;
   final Widget? navigation;
   final bool compact;
   final AppDestination? currentDestination;
-  final ValueChanged<String>? showMessage;
 
   @override
   State<ListeningSettingsPage> createState() => _ListeningSettingsPageState();
 }
 
 class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
-  bool _refreshing = false;
-
-  Future<void> _refresh() async {
-    setState(() => _refreshing = true);
-    try {
-      await widget.forceRefresh();
-    } catch (error) {
-      if (mounted) {
-        final message = ApiError.messageFor(error);
-        final showMessage = widget.showMessage;
-        if (showMessage != null) {
-          showMessage(message);
-        } else {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(message)));
-        }
-      }
-    } finally {
-      if (mounted) setState(() => _refreshing = false);
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     final app = AppScope.appOf(context);
     Widget action(IconData icon, String title, VoidCallback? onTap,
         {bool selected = false, Widget? leadingIcon}) {
-      final leading = _refreshing && icon == Icons.sync_rounded
-          ? const SizedBox.square(
-              dimension: 20, child: CircularProgressIndicator(strokeWidth: 2))
-          : leadingIcon ?? Icon(icon, size: 24);
+      final leading = leadingIcon ?? Icon(icon, size: 24);
       return Tooltip(
         message: title,
         child: widget.compact
@@ -195,10 +166,6 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                         PluginExtensionIcon(extension: extension, size: 24)),
             ]),
           group([
-            action(
-                Icons.sync_rounded,
-                context.localeText('强制刷新', 'Force refresh'),
-                _refreshing ? null : _refresh),
             entry(
                 Icons.info_outline_rounded,
                 context.localeText('关于听悦', 'About Ting Reader'),

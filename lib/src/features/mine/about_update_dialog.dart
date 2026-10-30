@@ -13,12 +13,14 @@ class AboutPage extends StatefulWidget {
     super.key,
     required this.backendVersion,
     required this.onBack,
+    this.onForceRefresh,
     this.updateService,
     this.openLink = openExternalUrl,
   });
 
   final String? backendVersion;
   final VoidCallback onBack;
+  final Future<void> Function()? onForceRefresh;
   final ClientUpdateService? updateService;
   final Future<bool> Function(String) openLink;
 
@@ -34,6 +36,7 @@ class _AboutPageState extends State<AboutPage> {
   String? _clientError;
   String _clientVersion = '';
   bool _loadingBackend = false;
+  bool _refreshingData = false;
   bool _checkingBackend = false;
   bool _checkingClient = false;
   bool _downloadingClient = false;
@@ -89,6 +92,19 @@ class _AboutPageState extends State<AboutPage> {
       if (mounted) setState(() => _clientVersion = version);
     } catch (_) {
       // 版本读取失败时仍保留项目链接和手动下载入口。
+    }
+  }
+
+  Future<void> _refreshData() async {
+    final refresh = widget.onForceRefresh;
+    if (refresh == null || _refreshingData) return;
+    setState(() => _refreshingData = true);
+    try {
+      await refresh();
+    } catch (error) {
+      if (mounted) _showSnack(ApiError.messageFor(error));
+    } finally {
+      if (mounted) setState(() => _refreshingData = false);
     }
   }
 
@@ -386,6 +402,29 @@ class _AboutPageState extends State<AboutPage> {
                     ],
                   ),
                 ),
+                if (widget.onForceRefresh != null) ...[
+                  const SizedBox(height: 16),
+                  TingCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text(context.localeText('数据刷新', 'Refresh data'),
+                            style: Theme.of(context).textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        Text(context.localeText('重新加载书籍信息和封面，已下载的音频会保留。',
+                            'Reload book details and covers. Downloaded audio is kept.')),
+                        const SizedBox(height: 12),
+                        OutlinedButton.icon(
+                          onPressed: _refreshingData ? null : _refreshData,
+                          icon: const Icon(Icons.sync_rounded),
+                          label: Text(_refreshingData
+                              ? context.localeText('刷新中…', 'Refreshing…')
+                              : context.localeText('强制刷新', 'Force refresh')),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 24),
               ],
             ),

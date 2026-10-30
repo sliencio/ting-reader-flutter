@@ -323,7 +323,7 @@ class _AppShellState extends State<AppShell> {
                     open: _settingsOpen,
                     onOpen: _openSettings,
                     onClose: _closeSettings,
-                    swipeEnabled: !player.isExpanded &&
+                    swipeEnabled: (_settingsOpen || !player.isExpanded) &&
                         [TargetPlatform.android, TargetPlatform.iOS]
                             .contains(Theme.of(context).platform),
                     panel: _settingsCreated
@@ -378,7 +378,10 @@ class _AppShellState extends State<AppShell> {
                             left: collapsedMini ? 24 : 12,
                             right: collapsedMini ? null : 12,
                             bottom: bottomInset + (collapsedMini ? 20 : 12),
-                            child: const MiniPlayer(),
+                            child: const Material(
+                              type: MaterialType.transparency,
+                              child: MiniPlayer(),
+                            ),
                           ),
                         if (!player.isExpanded)
                           Positioned.fill(
@@ -512,10 +515,7 @@ class _AppShellState extends State<AppShell> {
                   embedded: true,
                   compact: compact,
                   currentDestination: _navigation.navDestination,
-                  showMessage: (message) => ScaffoldMessenger.of(context)
-                      .showSnackBar(SnackBar(content: Text(message))),
                   navigation: navigation,
-                  forceRefresh: _forceRefresh,
                   go: _go,
                   onOpenPluginPage: _openPluginPage,
                   pluginPages: _sidebarPluginPages,
@@ -588,7 +588,6 @@ class _AppShellState extends State<AppShell> {
         );
       case AppDestination.mine:
         return ListeningSettingsPage(
-          forceRefresh: _forceRefresh,
           go: _go,
           onOpenPluginPage: _openPluginPage,
           pluginPages: _sidebarPluginPages,
@@ -639,6 +638,7 @@ class _AppShellState extends State<AppShell> {
       case AppDestination.about:
         return AboutPage(
           backendVersion: _aboutBackendVersion,
+          onForceRefresh: _forceRefresh,
           onBack: () => _go(AppDestination.mine),
         );
       case AppDestination.libraries:
