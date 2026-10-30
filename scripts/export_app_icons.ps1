@@ -94,7 +94,21 @@ function Test-IconEdges {
     } finally { $source.Dispose() }
 }
 
+function Test-IconMaster {
+    # 底部必须铺满薄荷色书页，不能把母版预裁圆角后留下的青绿缺口带入方形图标。
+    foreach ($row in @(0.98, 0.99, 1.0)) {
+        $y = [Math]::Min($master.Height - 1, [int][Math]::Floor($master.Height * $row))
+        for ($x = 0; $x -lt $master.Width; $x++) {
+            $color = ([Drawing.Bitmap]$master).GetPixel($x, $y)
+            if ($color.A -ne 255 -or $color.R -lt 90 -or $color.G -lt 160 -or $color.B -lt 120) {
+                throw "母版底部未铺满书页，存在圆角缺口或透明像素：($x, $y)"
+            }
+        }
+    }
+}
+
 try {
+    Test-IconMaster
     Test-IconEdges
     $pngs = @((Join-Path $projectRoot 'assets/images/logo.png'), (Join-Path $projectRoot 'web/favicon.png'))
     $pngs += @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'android/app/src/main/res') -Filter 'ic_launcher.png' -File -Recurse | ForEach-Object FullName)
