@@ -59,6 +59,7 @@ extension _PlayerPlayback on PlayerState {
     usingLocalFile = false;
     isMiniCollapsed = false;
     _seekGeneration++;
+    _applyingQueueStartSeek = false;
     _suppressPositionUpdates = true;
     _usingTranscodeStream = false;
     _usingAudioQueue = reuseQueue;
@@ -438,16 +439,32 @@ extension _PlayerPlayback on PlayerState {
     Book book,
     Chapter chapter,
   ) async {
-    ++_seekGeneration;
+    final seekGeneration = ++_seekGeneration;
+    final playGeneration = _playGeneration;
     final start = _startPositionFor(book, chapter);
     _applyingQueueStartSeek = true;
     try {
-      await _audio.seek(
-        Duration(milliseconds: (start * 1000).round()),
-        index: index,
-      );
+      final position = Duration(milliseconds: (start * 1000).round());
+      if (_audio.currentIndex != index) {
+        await _audio.seek(position, index: index);
+      }
+      if (start > 0) {
+        // Android 与桌面后端切章时可能仍在加载；此时 seek 会被忽略。
+        // 等目标章就绪后单独定位，不把上一章的乐观位置当成定位成功。
+        await _audio.playbackEventStream
+            .firstWhere((event) =>
+                event.currentIndex == index &&
+                event.processingState == audio.ProcessingState.ready)
+            .timeout(const Duration(seconds: 15));
+        if (!_isActivePlay(playGeneration, chapter.id) ||
+            seekGeneration != _seekGeneration ||
+            _audio.currentIndex != index) {
+          return;
+        }
+        await _audio.seek(position);
+      }
     } finally {
-      _applyingQueueStartSeek = false;
+      if (seekGeneration == _seekGeneration) _applyingQueueStartSeek = false;
     }
   }
 
@@ -519,8 +536,7 @@ extension _PlayerPlayback on PlayerState {
       Future<void>(() async {
         if (!_isActivePlay(playGeneration, nextChapter.id) ||
             seekGeneration != _seekGeneration ||
-            _audio.currentIndex != index ||
-            _audio.position.inMilliseconds / 1000 >= startPosition) {
+            _audio.currentIndex != index) {
           return;
         }
         await _seekAudioQueueToChapter(index, book, nextChapter);

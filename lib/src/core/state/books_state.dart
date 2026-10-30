@@ -7,6 +7,7 @@ import '../api/api_error.dart';
 import '../models/models.dart';
 import '../utils/chapter_sort.dart';
 import '../utils/formatters.dart';
+import '../services/bookshelf_cache.dart';
 
 /// Pending chapter edits, shared filtering and the exact batch write payload.
 /// UI controllers and confirmation dialogs stay with the page.
@@ -690,13 +691,53 @@ class BookshelfState extends ChangeNotifier {
   String selectedLibrary = '';
   String sortBy = 'created_at';
   String searchQuery = '';
+  final _cache = BookshelfCache();
+  String? _loadedIdentity;
+  bool hasSnapshot = false;
+
+  String get _identity => api.sessionIdentity?.call() ?? api.baseUrl;
+
+  void _applySnapshot(Map<String, dynamic> snapshot) {
+    final nextBooks = asMapList(snapshot['books']).map(Book.fromJson).toList();
+    final nextSeries =
+        asMapList(snapshot['series']).map(Series.fromJson).toList();
+    final nextLibraries =
+        asMapList(snapshot['libraries']).map(Library.fromJson).toList();
+    settings = asMap(snapshot['settings']);
+    libraries = nextLibraries;
+    books = nextBooks;
+    series = nextSeries;
+    selectedLibrary = (settings['bookshelf_library_id'] ?? '').toString();
+    sortBy = (settings['bookshelf_sort_by'] ?? 'created_at').toString();
+    hasSnapshot = true;
+  }
 
   Future<void> load({bool background = false}) async {
     if (_disposed) return;
     _loadToken?.cancel('Shelf query replaced');
     final token = CancelToken();
     _loadToken = token;
-    loading = !background || books.isEmpty;
+    final identity = _identity;
+    bool active() => !_disposed && !token.isCancelled && identity == _identity;
+    if (_loadedIdentity != identity) {
+      hasSnapshot = false;
+      books = [];
+      series = [];
+      libraries = [];
+      settings = {};
+      selectedLibrary = '';
+      final cached = await _cache.read(identity);
+      if (!active()) return;
+      _loadedIdentity = identity;
+      if (cached != null) {
+        try {
+          _applySnapshot(cached);
+        } catch (_) {
+          // 缓存结构不兼容时继续请求服务端。
+        }
+      }
+    }
+    loading = !hasSnapshot;
     error = null;
     notifyListeners();
     try {
@@ -704,7 +745,7 @@ class BookshelfState extends ChangeNotifier {
         api.get('/api/settings', cancelToken: token),
         api.get('/api/libraries', cancelToken: token),
       ]);
-      if (_disposed || token.isCancelled) return;
+      if (!active()) return;
       final payload = asMap(initial[0].data);
       final nextSettings = {...asMap(payload['settings_json']), ...payload}
         ..remove('settings_json');
@@ -717,15 +758,36 @@ class BookshelfState extends ChangeNotifier {
         api.get('/api/books', params: params, cancelToken: token),
         api.get('/api/v1/series', params: params, cancelToken: token),
       ]);
-      if (_disposed || token.isCancelled) return;
-      settings = nextSettings;
+      if (!active()) return;
+      settings = {...nextSettings, 'bookshelf_library_id': library};
       libraries = nextLibraries;
       selectedLibrary = library;
       sortBy = (settings['bookshelf_sort_by'] ?? 'created_at').toString();
       books = asMapList(results[0].data).map(Book.fromJson).toList();
       series = asMapList(results[1].data).map(Series.fromJson).toList();
+      hasSnapshot = true;
+      // 只保存书架展示设置及媒体库名称，不缓存连接凭据和刮削配置。
+      unawaited(_cache.write(identity, {
+        'books': asMapList(results[0].data),
+        'series': asMapList(results[1].data),
+        'libraries': [
+          for (final item in nextLibraries)
+            {
+              'id': item.id,
+              'name': item.name,
+              'library_type': item.libraryType
+            },
+        ],
+        'settings': {
+          for (final entry in settings.entries)
+            if (entry.key.startsWith('bookshelf_')) entry.key: entry.value,
+        },
+      }));
     } catch (failure) {
-      if (!_disposed && !token.isCancelled) {
+      if (active()) {
+        if (hasSnapshot) {
+          selectedLibrary = (settings['bookshelf_library_id'] ?? '').toString();
+        }
         error = ApiError.messageFor(failure);
       }
     } finally {

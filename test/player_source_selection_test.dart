@@ -128,6 +128,8 @@ class _NativeAudio {
   bool holdPlayback = false;
   bool failSeek = false;
   bool emitSeeks = false;
+  bool loseIndexedSeekPosition = false;
+  int reportedIndex = 0;
   int playCount = 0;
   int pauseCount = 0;
   Future<void>? pauseGate;
@@ -169,8 +171,15 @@ class _NativeAudio {
             if (failSeek) throw PlatformException(code: 'seek_failed');
             if (emitSeeks) {
               final args = request.arguments as Map;
+              if (loseIndexedSeekPosition && args['index'] != null) {
+                emit(index: args['index'] as int, processingState: 1);
+                Timer(const Duration(milliseconds: 30), () {
+                  emit(index: args['index'] as int);
+                });
+                return <String, dynamic>{};
+              }
               emit(
-                  index: args['index'] as int? ?? 0,
+                  index: args['index'] as int?,
                   position:
                       Duration(microseconds: args['position'] as int? ?? 0));
             }
@@ -218,8 +227,9 @@ class _NativeAudio {
   void emit({
     Duration position = Duration.zero,
     int processingState = 3,
-    int index = 0,
+    int? index,
   }) {
+    reportedIndex = index ?? reportedIndex;
     binding.channelBuffers.push(
         _events!.name,
         _codec.encodeSuccessEnvelope({
@@ -228,7 +238,7 @@ class _NativeAudio {
           'updatePosition': position.inMicroseconds,
           'bufferedPosition': reportedDuration.inMicroseconds,
           'duration': reportedDuration.inMicroseconds,
-          'currentIndex': index,
+          'currentIndex': reportedIndex,
         }),
         (_) {});
   }
@@ -1159,8 +1169,43 @@ void main() {
     await waitForPlayback(() =>
         player.currentChapter?.id == second.id && native.seeks.isNotEmpty);
     await Future<void>.delayed(const Duration(milliseconds: 50));
-    expect(native.seeks.where((item) => item['index'] == 1), hasLength(1));
+    expect(native.seeks, hasLength(1));
+    expect(native.seeks.last['index'], isNull);
     expect(native.seeks.last['position'], 30000000);
+    expect(player.error, isNull);
+  });
+
+  test('回归_手动切章丢失合并定位时等目标章就绪后重新定位片头', () async {
+    await player.savePlaybackSettings(book, 30, 15);
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    native.emitSeeks = true;
+    native.loseIndexedSeekPosition = true;
+    await player.playChapter(book, [first, second], first);
+    await player.nextChapter();
+    await waitForPlayback(() => player.currentChapter?.id == second.id);
+    expect(player.currentChapter?.id, second.id);
+    expect(native.seeks.last['index'], isNull);
+    expect(native.seeks.last['position'], 30000000);
+    await waitForPlayback(() => player.currentTime >= 30);
+    expect(player.error, isNull);
+  });
+
+  test('回归_自动换章加载期间的旧位置不能阻止片头定位', () async {
+    await player.savePlaybackSettings(book, 30, 15);
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    native.emitSeeks = true;
+    await player.playChapter(book, [first, second], first);
+    native.emit(
+        index: 1, position: const Duration(seconds: 600), processingState: 1);
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(native.seeks, isEmpty);
+    native.emit(index: 1);
+    await waitForPlayback(() => native.seeks.isNotEmpty);
+    expect(native.seeks.last['index'], isNull);
+    expect(native.seeks.last['position'], 30000000);
+    expect(player.currentChapter?.id, second.id);
     expect(player.error, isNull);
   });
 

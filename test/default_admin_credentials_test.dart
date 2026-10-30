@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ting_reader_flutter/l10n/app_localizations.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/models/models.dart';
@@ -97,6 +98,7 @@ Future<_ReminderApp> _pumpShell(WidgetTester tester,
 }
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   test('credential status survives cached session encoding', () {
     final user = User.fromJson({
       'id': 'admin-id',

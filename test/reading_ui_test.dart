@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ting_reader_flutter/l10n/app_localizations.dart';
 import 'package:ting_reader_flutter/src/core/api/api_client.dart';
 import 'package:ting_reader_flutter/src/core/auth/fn_connect_client.dart';
@@ -418,6 +419,7 @@ Future<void> _pump(
 }
 
 void main() {
+  setUp(() => SharedPreferences.setMockInitialValues({}));
   testWidgets('直连登录过期时在应用内显示重登提示', (tester) async {
     final app = _ReadingApp()
       ..needsDirectLogin = true

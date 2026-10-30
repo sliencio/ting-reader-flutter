@@ -278,7 +278,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
   Widget build(BuildContext context) {
     final activeLetterValue = _activeLetter;
     if (_loading) return const LoadingView();
-    if (_shelf?.error != null) return LoadErrorView(onRetry: _load);
+    if (_shelf?.error != null && !(_shelf?.hasSnapshot ?? false)) {
+      return LoadErrorView(onRetry: _load);
+    }
     final appState = AppScope.appOf(context);
     final hasContent = _books.isNotEmpty || _series.isNotEmpty;
     final grouped = _groupedContent;
@@ -289,6 +291,14 @@ class _BookshelfPageState extends State<BookshelfPage> {
       controller: _scrollController,
       onRefresh: _load,
       children: [
+        if (_shelf?.error != null)
+          ListTile(
+            leading: const Icon(Icons.cloud_off_outlined),
+            title: Text(context.localeText('刷新失败，暂时显示已缓存的书架',
+                'Refresh failed. Showing the cached bookshelf')),
+            trailing: const Icon(Icons.refresh),
+            onTap: _load,
+          ),
         _Header(
           selectionMode: _selectionMode,
           selectedBookCount: _selectedBookIds.length,
