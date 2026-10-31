@@ -18,6 +18,7 @@ static NSMutableArray *commands;
 static BOOL _controlsUpdated = NO;
 static enum AudioProcessingState processingState = ApsIdle;
 static BOOL playing = NO;
+static MPRemoteCommandEvent *lastToggleEvent = nil;
 static NSNumber *position = nil;
 static NSNumber *bufferedPosition = nil;
 static NSNumber *updateTime = nil;
@@ -119,8 +120,7 @@ static NSMutableDictionary *nowPlayingInfo = nil;
         commands[8] = commandCenter.changePlaybackPositionCommand;
     }
     [commandCenter.changePlaybackRateCommand setEnabled:YES];
-    [commandCenter.togglePlayPauseCommand setEnabled:YES];
-    [commandCenter.togglePlayPauseCommand addTarget:self action:@selector(togglePlayPause:)];
+    lastToggleEvent = nil;
     // TODO: enable more commands
     // Language options
     if (@available(iOS 9.0, macOS 10.12.2, *)) {
@@ -419,7 +419,11 @@ static NSMutableDictionary *nowPlayingInfo = nil;
             }
             break;
         case APlayPause:
-            // Automatically enabled.
+            // 与其他系统命令统一管理，保证切换回调仅注册一次。
+            [commandCenter.togglePlayPauseCommand removeTarget:self];
+            if (enable) {
+                [commandCenter.togglePlayPauseCommand addTarget:self action:@selector(togglePlayPause:)];
+            }
             break;
         case ASetRepeatMode:
             if (enable) {
@@ -464,10 +468,13 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 
 - (MPRemoteCommandHandlerStatus) togglePlayPause: (MPRemoteCommandEvent *) event {
     [self logRemoteCommand:@"togglePlayPause"];
-    //NSLog(@"togglePlayPause");
-    [handlerChannel invokeMethod:@"click" arguments:@{
-        @"button":@(0)
-    }];
+    // 同一系统事件不能重复切换，避免暂停后又被第二次回调恢复播放。
+    if (lastToggleEvent && (event == lastToggleEvent || event.timestamp == lastToggleEvent.timestamp)) {
+        return MPRemoteCommandHandlerStatusSuccess;
+    }
+    lastToggleEvent = event;
+    // 使用与锁屏按钮一致的明确命令，避免跨通道后再判断一次切换方向。
+    [handlerChannel invokeMethod:(playing ? @"pause" : @"play") arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 

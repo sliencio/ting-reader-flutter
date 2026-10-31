@@ -113,6 +113,10 @@ class _NativeNotifications {
     sendCommand('click', {'button': 0});
   }
 
+  void clickAppleHeadset() {
+    sendCommand(states.last['playing'] == true ? 'pause' : 'play');
+  }
+
   void sendCommand(String command,
       [Map<String, dynamic> arguments = const {}]) {
     binding.channelBuffers.push(
@@ -492,6 +496,26 @@ void main() {
       notifications.clickHeadset();
       await waitForPlayback(
           () => player.isPlaying && native.playCount == cycle + 2);
+    }
+  });
+
+  test('Apple 原生明确命令支持先手动暂停再耳机续播及连续暂停恢复', () async {
+    await startFocusPlayback();
+    await player.pause();
+    await waitForPlayback(() =>
+        !player.isPlaying && notifications.states.last['playing'] == false);
+    notifications.clickAppleHeadset();
+    await waitForPlayback(() => player.isPlaying && native.playCount == 2);
+    for (var cycle = 0; cycle < 5; cycle++) {
+      notifications.clickAppleHeadset();
+      await waitForPlayback(() =>
+          !player.isPlaying && notifications.states.last['playing'] == false);
+      final plays = native.playCount;
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(native.playCount, plays);
+      notifications.clickAppleHeadset();
+      await waitForPlayback(
+          () => player.isPlaying && native.playCount == plays + 1);
     }
   });
 
