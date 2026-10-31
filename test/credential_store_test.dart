@@ -1,10 +1,43 @@
 import 'dart:convert';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter_secure_storage_platform_interface/flutter_secure_storage_platform_interface.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:ting_reader_flutter/src/core/auth/credential_store.dart';
 import 'package:ting_reader_flutter/src/core/state/app_state.dart';
+
+class _RecordingStorage extends FlutterSecureStoragePlatform {
+  final values = <String, String>{};
+  final calls = <Map<String, String>>[];
+
+  @override
+  Future<void> write(
+      {required String key,
+      required String value,
+      required Map<String, String> options}) async {
+    calls.add(options);
+    values[key] = value;
+  }
+
+  @override
+  Future<String?> read(
+      {required String key, required Map<String, String> options}) async {
+    calls.add(options);
+    return values[key];
+  }
+
+  @override
+  Future<void> delete(
+      {required String key, required Map<String, String> options}) async {
+    calls.add(options);
+    values.remove(key);
+  }
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
 
 class _FailedStorage extends FlutterSecureStorage {
   _FailedStorage({this.discardWrites = false});
@@ -71,6 +104,29 @@ Map<String, Object> _legacyValues() => {
     };
 
 void main() {
+  test('Mac 默认凭据读写使用传统钥匙串，不申请受限共享权限', () async {
+    final previous = FlutterSecureStoragePlatform.instance;
+    final storage = _RecordingStorage();
+    FlutterSecureStoragePlatform.instance = storage;
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    addTearDown(() {
+      FlutterSecureStoragePlatform.instance = previous;
+      debugDefaultTargetPlatformOverride = null;
+    });
+    final state = AppState();
+    addTearDown(state.dispose);
+    await state.rememberServerProfile(
+        server: 'http://reader.test:3000',
+        username: 'reader',
+        password: 'secret');
+    expect(storage.values, isNotEmpty);
+    expect(storage.calls, isNotEmpty);
+    expect(
+        storage.calls.every(
+            (options) => options['usesDataProtectionKeychain'] == 'false'),
+        isTrue);
+    debugDefaultTargetPlatformOverride = null;
+  });
   test('migrates sessions and all profile secrets, then restores after restart',
       () async {
     SharedPreferences.setMockInitialValues(_legacyValues());

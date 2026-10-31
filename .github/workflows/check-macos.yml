@@ -1,0 +1,29 @@
+name: Verify macOS startup
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+  macos:
+    name: 构建并验证 Mac 启动
+    needs: quality
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      PUB_HOSTED_URL: https://pub.dev
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.0'
+          cache: true
+      - run: bash scripts/build_macos.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-verified
+          path: dist/TingReader-macos.zip

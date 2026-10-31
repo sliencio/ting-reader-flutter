@@ -7,6 +7,7 @@ prepare_build macos "$@"
 shopt -s nullglob
 apps=("$PROJECT_ROOT"/build/macos/Build/Products/Release/*.app)
 [[ ${#apps[@]} == 1 ]] || fail '没有找到唯一的 macOS 应用'
+bash "$PROJECT_ROOT/scripts/verify_macos_app.sh" "${apps[0]}" --smoke
 start_package
 mkdir -p "$PACKAGE_STAGE/TingReader-macos"
 ditto "${apps[0]}" "$PACKAGE_STAGE/TingReader-macos/$(basename "${apps[0]}")"

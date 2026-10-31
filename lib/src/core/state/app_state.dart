@@ -97,7 +97,11 @@ class AppState extends ChangeNotifier {
   AppState({FnConnectClient? fnConnect, FlutterSecureStorage? secureStorage})
       : _ownsFnConnect = fnConnect == null,
         fnConnect = fnConnect ?? FnConnectClient(),
-        _secureStorage = secureStorage ?? const FlutterSecureStorage() {
+        // Mac 临时签名发行使用系统传统钥匙串，不申请需要描述文件的共享权限。
+        _secureStorage = secureStorage ??
+            const FlutterSecureStorage(
+              mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+            ) {
     app_time_zone.initializeApplicationTimeZones();
     api.isGatewaySession = () =>
         serverMode == ServerProfileMode.fnosGateway && fnId.trim().isNotEmpty;

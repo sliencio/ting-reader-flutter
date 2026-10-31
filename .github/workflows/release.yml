@@ -301,6 +301,12 @@ jobs:
             BUILD_NAME="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
           fi
           flutter build macos --release --build-name "$BUILD_NAME" --build-number "$GITHUB_RUN_NUMBER"
+      - name: 检查 Mac 签名权限、架构及启动
+        run: |
+          shopt -s nullglob
+          apps=(build/macos/Build/Products/Release/*.app)
+          test "${#apps[@]}" -eq 1
+          bash scripts/verify_macos_app.sh "${apps[0]}" --smoke
       - run: |
           mkdir -p dist
           ditto -c -k --sequesterRsrc --keepParent build/macos/Build/Products/Release/*.app dist/TingReader-macos.zip
