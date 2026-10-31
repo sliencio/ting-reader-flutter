@@ -117,6 +117,12 @@ class _NativeNotifications {
     sendCommand(states.last['playing'] == true ? 'pause' : 'play');
   }
 
+  Set<int> get enabledNativeActions => {
+        ...(states.last['systemActions'] as List).cast<int>(),
+        for (final control in states.last['controls'] as List)
+          (control as Map)['action'] as int,
+      };
+
   void sendCommand(String command,
       [Map<String, dynamic> arguments = const {}]) {
     binding.channelBuffers.push(
@@ -467,8 +473,7 @@ void main() {
 
   test('Apple headset toggle remains enabled after pause and resume', () async {
     await startFocusPlayback();
-    // iOS builds the command enable mask from controls and systemActions.
-    // The headset toggle has its own action, separate from play and pause.
+    // 核对实际传给 iOS 的 controls 与 systemActions 合并后的命令位图。
     const toggleAction = MediaActionMessage.playPause;
     for (var cycle = 0; cycle < 2; cycle++) {
       await waitForPlayback(() =>
@@ -476,23 +481,19 @@ void main() {
           notifications.states.last['playing'] == true);
       expect(notifications.states.last['systemActions'],
           contains(toggleAction.index));
-      expect(
-          notifications.states.last['systemActions'],
-          containsAll([
-            MediaActionMessage.play.index,
-            MediaActionMessage.pause.index,
-          ]));
+      expect(notifications.enabledNativeActions,
+          contains(MediaActionMessage.pause.index));
+      expect(notifications.enabledNativeActions,
+          isNot(contains(MediaActionMessage.play.index)));
       notifications.clickHeadset();
       await waitForPlayback(() =>
           !player.isPlaying && notifications.states.last['playing'] == false);
       expect(notifications.states.last['systemActions'],
           contains(toggleAction.index));
-      expect(
-          notifications.states.last['systemActions'],
-          containsAll([
-            MediaActionMessage.play.index,
-            MediaActionMessage.pause.index,
-          ]));
+      expect(notifications.enabledNativeActions,
+          contains(MediaActionMessage.play.index));
+      expect(notifications.enabledNativeActions,
+          isNot(contains(MediaActionMessage.pause.index)));
       notifications.clickHeadset();
       await waitForPlayback(
           () => player.isPlaying && native.playCount == cycle + 2);
