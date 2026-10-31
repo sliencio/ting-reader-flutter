@@ -21,6 +21,9 @@ with open(sys.argv[1], 'rb') as stream:
     entitlements = plistlib.load(stream)
 assert 'keychain-access-groups' not in entitlements, '独立发行包不能申请钥匙串共享权限'
 assert not entitlements.get('com.apple.security.get-task-allow'), '发行包不能携带调试权限'
+assert entitlements.get('com.apple.security.network.client'), '发行包缺少网络客户端权限，无法访问服务器音频'
+# just_audio 在音源带有请求头时通过本地 HTTP 代理转发，代理需要绑定回环端口。
+assert entitlements.get('com.apple.security.network.server'), '发行包缺少网络服务端权限，本地音频代理无法启动，播放会一直停留在加载状态'
 PY
 executable="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$app/Contents/Info.plist")"
 lipo "$app/Contents/MacOS/$executable" -verify_arch arm64
