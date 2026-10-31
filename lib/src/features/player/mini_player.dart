@@ -111,15 +111,20 @@ class _MiniPlayerState extends State<MiniPlayer> {
               padding: EdgeInsets.symmetric(horizontal: isPhoneWidth ? 10 : 24),
               decoration: BoxDecoration(
                 color: bgColor,
-                borderRadius: BorderRadius.circular(24),
-                border: Border.all(color: borderColor),
+                borderRadius: BorderRadius.circular(22),
+                border: Border.all(
+                  color: borderColor.withValues(
+                    alpha: context.isDark ? 0.7 : 0.85,
+                  ),
+                ),
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black.withValues(
-                      alpha: context.isDark ? 0.36 : 0.16,
+                      alpha: context.isDark ? 0.34 : 0.1,
                     ),
-                    blurRadius: 24,
-                    offset: const Offset(0, 10),
+                    blurRadius: 28,
+                    spreadRadius: -2,
+                    offset: const Offset(0, 12),
                   ),
                 ],
               ),
@@ -610,10 +615,33 @@ class ExpandedPlayerOverlay extends StatelessWidget {
     return AnimatedBuilder(
       animation: player,
       builder: (context, _) {
-        if (!player.isExpanded || !player.hasChapter) {
-          return const SizedBox.shrink();
-        }
-        return _ExpandedPlayer(player: player);
+        final visible = player.isExpanded && player.hasChapter;
+        // 展开与收起用淡入加轻微上浮衔接，避免整屏界面硬切。
+        return AnimatedSwitcher(
+          duration: const Duration(milliseconds: 260),
+          reverseDuration: const Duration(milliseconds: 180),
+          switchInCurve: Curves.easeOutCubic,
+          switchOutCurve: Curves.easeInCubic,
+          transitionBuilder: (child, animation) {
+            final curved = CurvedAnimation(
+              parent: animation,
+              curve: Curves.easeOutCubic,
+            );
+            return FadeTransition(
+              opacity: curved,
+              child: SlideTransition(
+                position: Tween<Offset>(
+                  begin: const Offset(0, 0.035),
+                  end: Offset.zero,
+                ).animate(curved),
+                child: child,
+              ),
+            );
+          },
+          child: visible
+              ? _ExpandedPlayer(key: const ValueKey('expanded'), player: player)
+              : const SizedBox.shrink(key: ValueKey('collapsed')),
+        );
       },
     );
   }

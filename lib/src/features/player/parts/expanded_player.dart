@@ -1,7 +1,7 @@
 part of '../mini_player.dart';
 
 class _ExpandedPlayer extends StatefulWidget {
-  const _ExpandedPlayer({required this.player});
+  const _ExpandedPlayer({super.key, required this.player});
 
   final PlayerState player;
 
@@ -190,27 +190,18 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                   padding: const EdgeInsets.symmetric(
                     horizontal: 14,
                   ),
-                  child: Column(
-                    children: [
-                      Text(
-                        localizedChapterTitle(context, chapter),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 17),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        localizedBookTitle(context, book),
-                        textAlign: TextAlign.center,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: context.mutedText,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
+                  // 章节标题已在控制区以大字号展示，这里只保留书名，避免重复。
+                  child: Text(
+                    localizedBookTitle(context, book),
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: context.mutedText,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.2,
+                    ),
                   ),
                 ),
               ),
@@ -310,15 +301,16 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                 ),
               ),
             ),
-            const SizedBox(height: 9),
+            const SizedBox(height: 8),
             Text(
               book.narrator ?? book.author ?? localizedBookTitle(context, book),
               textAlign: TextAlign.center,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: context.mutedText,
-                fontSize: 14,
+                color: context.tertiaryText,
+                fontSize: 13,
+                letterSpacing: 0.2,
               ),
             ),
             PlaybackStatusNotice(player: player),
@@ -368,15 +360,18 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                 ),
               ],
             ),
-            SizedBox(height: tightControls ? 16 : 22),
+            SizedBox(height: tightControls ? 14 : 20),
             SliderTheme(
               data: SliderTheme.of(context).copyWith(
-                trackHeight: 6,
+                trackHeight: 5,
                 activeTrackColor: accentColor,
                 inactiveTrackColor:
                     context.isDark ? AppColors.slate800 : AppColors.slate200,
-                thumbColor: accentColor,
-                overlayColor: accentColor.withValues(alpha: 0.16),
+                thumbColor: Colors.white,
+                overlayColor: accentColor.withValues(alpha: 0.14),
+                thumbShape: _GlowSliderThumb(color: accentColor),
+                overlayShape: const RoundSliderOverlayShape(overlayRadius: 16),
+                trackShape: const RoundedRectSliderTrackShape(),
               ),
               child: Slider(
                 min: 0,
@@ -392,7 +387,7 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
               ),
             ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: 2),
               child: Row(
                 children: [
                   _SeekButton(
@@ -404,17 +399,26 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
                           .toDouble(),
                     ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 6),
                   Text(
                     formatDurationShort(sliderValue),
-                    style: TextStyle(color: context.mutedText),
+                    style: TextStyle(
+                      color: context.secondaryText,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
                   const Spacer(),
                   Text(
                     formatDurationShort(maxDuration),
-                    style: TextStyle(color: context.mutedText),
+                    style: TextStyle(
+                      color: context.tertiaryText,
+                      fontSize: 12,
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
                   ),
-                  const SizedBox(width: 10),
+                  const SizedBox(width: 6),
                   _SeekButton(
                     icon: Icons.rotate_right_rounded,
                     label: '15',

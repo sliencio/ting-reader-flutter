@@ -1,5 +1,48 @@
 part of '../mini_player.dart';
 
+/// 播放器主滑块的手柄：白色圆点 + 强调色描边与柔光，拖动时略微放大。
+class _GlowSliderThumb extends SliderComponentShape {
+  const _GlowSliderThumb({required this.color});
+
+  final Color color;
+
+  @override
+  Size getPreferredSize(bool isEnabled, bool isDiscrete) => const Size(18, 18);
+
+  @override
+  void paint(
+    PaintingContext context,
+    Offset center, {
+    required Animation<double> activationAnimation,
+    required Animation<double> enableAnimation,
+    required bool isDiscrete,
+    required TextPainter labelPainter,
+    required RenderBox parentBox,
+    required SliderThemeData sliderTheme,
+    required TextDirection textDirection,
+    required double value,
+    required double textScaleFactor,
+    required Size sizeWithOverflow,
+  }) {
+    final canvas = context.canvas;
+    final scale = 1 + 0.12 * activationAnimation.value;
+    final radius = 8.0 * scale;
+    final glow = Paint()
+      ..color = color.withValues(alpha: 0.28)
+      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 6);
+    canvas.drawCircle(center, radius + 2, glow);
+    canvas.drawCircle(center, radius, Paint()..color = Colors.white);
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = color
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5,
+    );
+  }
+}
+
 class _MiniProgressSlider extends StatefulWidget {
   const _MiniProgressSlider({
     required this.player,
@@ -248,38 +291,80 @@ class _IconCircle extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = diameter ?? (filled ? 46 : 38);
     final resolvedIconSize = iconSize ?? (filled ? 28 : 22);
+    final baseColor = fillColor ?? AppColors.primary600;
+    final background = filled
+        ? null
+        : ghost
+            ? Colors.transparent
+            : (context.isDark
+                ? AppColors.slate800.withValues(alpha: 0.55)
+                : Colors.white.withValues(alpha: 0.72));
     return SizedBox(
       width: size,
       height: size,
-      child: Material(
-        color: filled
-            ? (fillColor ?? AppColors.primary600)
-            : ghost
-                ? Colors.transparent
-                : (context.isDark
-                    ? AppColors.slate800.withValues(alpha: 0.6)
-                    : Colors.white.withValues(alpha: 0.6)),
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () => onPressed(),
-          child: loading
-              ? Center(
-                  child: SizedBox(
-                      width: resolvedIconSize,
-                      height: resolvedIconSize,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: filled
-                              ? (filledIconColor ?? Colors.white)
-                              : context.mutedText)))
-              : Icon(
-                  icon,
-                  color: filled
-                      ? (filledIconColor ?? Colors.white)
-                      : context.mutedText,
-                  size: resolvedIconSize,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: filled
+              ? LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Color.lerp(baseColor, Colors.white, 0.16)!,
+                    baseColor,
+                    Color.lerp(baseColor, Colors.black, 0.12)!,
+                  ],
+                )
+              : null,
+          color: background,
+          border: filled || ghost
+              ? null
+              : Border.all(
+                  color: context.isDark
+                      ? Colors.white.withValues(alpha: 0.06)
+                      : Colors.black.withValues(alpha: 0.04),
                 ),
+          boxShadow: filled
+              ? [
+                  BoxShadow(
+                    color: baseColor.withValues(alpha: 0.42),
+                    blurRadius: 22,
+                    offset: const Offset(0, 10),
+                  ),
+                  BoxShadow(
+                    color: Colors.black.withValues(
+                      alpha: context.isDark ? 0.3 : 0.08,
+                    ),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => onPressed(),
+            child: loading
+                ? Center(
+                    child: SizedBox(
+                        width: resolvedIconSize,
+                        height: resolvedIconSize,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: filled
+                                ? (filledIconColor ?? Colors.white)
+                                : context.mutedText)))
+                : Icon(
+                    icon,
+                    color: filled
+                        ? (filledIconColor ?? Colors.white)
+                        : context.mutedText,
+                    size: resolvedIconSize,
+                  ),
+          ),
         ),
       ),
     );
@@ -304,6 +389,7 @@ class _QuickActionButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     const activeColor = AppColors.primary600;
+    final iconColor = active ? activeColor : context.mutedText;
     return InkWell(
       onTap: () {
         final handler = onTapWithContext;
@@ -313,31 +399,43 @@ class _QuickActionButton extends StatelessWidget {
           onTap?.call();
         }
       },
-      borderRadius: BorderRadius.circular(18),
+      borderRadius: BorderRadius.circular(16),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: 6),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(
-              width: 42,
-              height: 36,
-              child: Center(
-                child: Icon(
-                  icon,
-                  size: 19,
-                  color: active ? activeColor : context.mutedText,
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              curve: Curves.easeOutCubic,
+              width: 44,
+              height: 40,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                color: active
+                    ? activeColor.withValues(alpha: context.isDark ? 0.2 : 0.12)
+                    : (context.isDark
+                        ? Colors.white.withValues(alpha: 0.05)
+                        : Colors.black.withValues(alpha: 0.03)),
+                border: Border.all(
+                  color: active
+                      ? activeColor.withValues(alpha: 0.32)
+                      : Colors.transparent,
                 ),
               ),
+              child: Center(
+                child: Icon(icon, size: 19, color: iconColor),
+              ),
             ),
-            const SizedBox(height: 6),
+            const SizedBox(height: 7),
             Text(
               label,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 11,
-                fontWeight: FontWeight.w700,
+                fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                letterSpacing: 0.1,
                 color: active ? activeColor : context.tertiaryText,
               ),
             ),
@@ -374,29 +472,38 @@ class _SeekButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 42,
-      height: 42,
-      child: Material(
-        color: Colors.transparent,
-        shape: const CircleBorder(),
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: () => onPressed(),
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              Icon(icon, size: 31, color: context.mutedText),
-              Text(
-                label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: context.mutedText,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w700,
-                  height: 1,
+      width: 44,
+      height: 44,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: context.isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : Colors.black.withValues(alpha: 0.035),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          shape: const CircleBorder(),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: () => onPressed(),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Icon(icon, size: 30, color: context.tertiaryText),
+                Text(
+                  label,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: context.secondaryText,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700,
+                    height: 1,
+                    fontFeatures: const [FontFeature.tabularFigures()],
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
