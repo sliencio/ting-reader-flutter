@@ -29,6 +29,10 @@ static NSNumber *fastForwardInterval = nil;
 static NSNumber *rewindInterval = nil;
 static MPMediaItemArtwork* artwork = nil;
 static NSMutableDictionary *nowPlayingInfo = nil;
+// 最近的系统媒体命令记录，用于在真机上确认 iOS 实际派发了哪条命令。
+// 耳机按键在不同机型上可能被系统翻译成不同命令，仅靠推断无法定位。
+static NSMutableArray *remoteCommandLog = nil;
+static const NSUInteger kRemoteCommandLogLimit = 40;
 
 @implementation AudioServicePlugin {
     FlutterMethodChannel *_channel;
@@ -142,7 +146,10 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 }
 
 - (void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {
-    if ([@"configure" isEqualToString:call.method]) {
+    if ([@"getRemoteCommandLog" isEqualToString:call.method]) {
+        // 供 App 内诊断页读取，确认耳机按键实际触发了哪条系统命令。
+        result(remoteCommandLog != nil ? [remoteCommandLog copy] : @[]);
+    } else if ([@"configure" isEqualToString:call.method]) {
         NSDictionary *args = (NSDictionary *)call.arguments;
         NSDictionary *configMap = (NSDictionary *)args[@"config"];
         fastForwardInterval = configMap[@"fastForwardInterval"];
@@ -253,6 +260,28 @@ static NSMutableDictionary *nowPlayingInfo = nil;
     NSLog(@"[TingRemote] command=%@ playing=%d actions=%ld category=%@ options=%lu mode=%@",
           command, playing, actionBits, session.category,
           (unsigned long)session.categoryOptions, session.mode);
+    [self recordRemoteCommand:command];
+}
+
+- (void)recordRemoteCommand:(NSString *)command {
+    if (!remoteCommandLog) {
+        remoteCommandLog = [NSMutableArray new];
+    }
+    NSNumber *rate = nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate];
+    [remoteCommandLog addObject:@{
+        @"command": command,
+        @"playing": @(playing),
+        @"rate": rate != nil ? rate : [NSNull null],
+        @"pauseEnabled": @(commandCenter ? commandCenter.pauseCommand.isEnabled : NO),
+        @"playEnabled": @(commandCenter ? commandCenter.playCommand.isEnabled : NO),
+        @"toggleEnabled": @(commandCenter ? commandCenter.togglePlayPauseCommand.isEnabled : NO),
+        @"nextEnabled": @(commandCenter ? commandCenter.nextTrackCommand.isEnabled : NO),
+        @"active": @([MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo != nil),
+        @"at": @((long long)([[NSDate date] timeIntervalSince1970] * 1000.0)),
+    }];
+    while (remoteCommandLog.count > kRemoteCommandLogLimit) {
+        [remoteCommandLog removeObjectAtIndex:0];
+    }
 }
 
 - (MPRemoteCommandHandlerStatus) play: (MPRemoteCommandEvent *) event {

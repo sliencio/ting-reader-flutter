@@ -18,6 +18,7 @@ static NSMutableArray *commands;
 static BOOL _controlsUpdated = NO;
 static enum AudioProcessingState processingState = ApsIdle;
 static BOOL playing = NO;
+static MPRemoteCommandEvent *lastToggleEvent = nil;
 static NSNumber *position = nil;
 static NSNumber *bufferedPosition = nil;
 static NSNumber *updateTime = nil;
@@ -28,6 +29,9 @@ static NSNumber *fastForwardInterval = nil;
 static NSNumber *rewindInterval = nil;
 static MPMediaItemArtwork* artwork = nil;
 static NSMutableDictionary *nowPlayingInfo = nil;
+// 最近的系统媒体命令记录，用于在真机上确认 macOS 实际派发了哪条命令。
+static NSMutableArray *remoteCommandLog = nil;
+static const NSUInteger kRemoteCommandLogLimit = 40;
 
 @implementation AudioServicePlugin {
     FlutterMethodChannel *_channel;
@@ -119,8 +123,13 @@ static NSMutableDictionary *nowPlayingInfo = nil;
         commands[8] = commandCenter.changePlaybackPositionCommand;
     }
     [commandCenter.changePlaybackRateCommand setEnabled:YES];
+    // 耳机切换回调与命令的 enabled 状态解耦：激活时无条件注册一次，
+    // 否则 updateControls 里的早退会让部分设备（如一代 AirPods 只上报
+    // 切换手势）的双击事件根本没有接收者。
     [commandCenter.togglePlayPauseCommand setEnabled:YES];
+    [commandCenter.togglePlayPauseCommand removeTarget:self];
     [commandCenter.togglePlayPauseCommand addTarget:self action:@selector(togglePlayPause:)];
+    lastToggleEvent = nil;
     // TODO: enable more commands
     // Language options
     if (@available(iOS 9.0, macOS 10.12.2, *)) {
@@ -136,7 +145,10 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 }
 
 - (void)handleMethodCall:(FlutterMethodCall*)call result:(FlutterResult)result {
-    if ([@"configure" isEqualToString:call.method]) {
+    if ([@"getRemoteCommandLog" isEqualToString:call.method]) {
+        // 供 App 内诊断页读取，确认耳机按键实际触发了哪条系统命令。
+        result(remoteCommandLog != nil ? [remoteCommandLog copy] : @[]);
+    } else if ([@"configure" isEqualToString:call.method]) {
         NSDictionary *args = (NSDictionary *)call.arguments;
         NSDictionary *configMap = (NSDictionary *)args[@"config"];
         fastForwardInterval = configMap[@"fastForwardInterval"];
@@ -242,14 +254,35 @@ static NSMutableDictionary *nowPlayingInfo = nil;
     }
 }
 
+- (void)recordRemoteCommand:(NSString *)command {
+    if (!remoteCommandLog) {
+        remoteCommandLog = [NSMutableArray new];
+    }
+    NSNumber *rate = nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate];
+    [remoteCommandLog addObject:@{
+        @"command": command,
+        @"playing": @(playing),
+        @"rate": rate != nil ? rate : [NSNull null],
+        @"pauseEnabled": @(commandCenter ? commandCenter.pauseCommand.isEnabled : NO),
+        @"playEnabled": @(commandCenter ? commandCenter.playCommand.isEnabled : NO),
+        @"toggleEnabled": @(commandCenter ? commandCenter.togglePlayPauseCommand.isEnabled : NO),
+        @"nextEnabled": @(commandCenter ? commandCenter.nextTrackCommand.isEnabled : NO),
+        @"active": @([MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo != nil),
+        @"at": @((long long)([[NSDate date] timeIntervalSince1970] * 1000.0)),
+    }];
+    while (remoteCommandLog.count > kRemoteCommandLogLimit) {
+        [remoteCommandLog removeObjectAtIndex:0];
+    }
+}
+
 - (MPRemoteCommandHandlerStatus) play: (MPRemoteCommandEvent *) event {
-    //NSLog(@"play");
+    [self recordRemoteCommand:@"play"];
     [handlerChannel invokeMethod:@"play" arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
 - (MPRemoteCommandHandlerStatus) pause: (MPRemoteCommandEvent *) event {
-    //NSLog(@"pause");
+    [self recordRemoteCommand:@"pause"];
     [handlerChannel invokeMethod:@"pause" arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
@@ -410,7 +443,9 @@ static NSMutableDictionary *nowPlayingInfo = nil;
             }
             break;
         case APlayPause:
-            // Automatically enabled.
+            // 回调在 activateCommandCenter 时已无条件注册，这里只维护可用状态，
+            // 避免 enabled 未翻转时提前 return 而永远注册不上。
+            [commandCenter.togglePlayPauseCommand setEnabled:YES];
             break;
         case ASetRepeatMode:
             if (enable) {
@@ -454,10 +489,17 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 }
 
 - (MPRemoteCommandHandlerStatus) togglePlayPause: (MPRemoteCommandEvent *) event {
-    //NSLog(@"togglePlayPause");
-    [handlerChannel invokeMethod:@"click" arguments:@{
-        @"button":@(0)
-    }];
+    NSLog(@"[TingRemote] command=togglePlayPause playing=%d actions=%ld", playing, actionBits);
+    // 同一系统事件不能重复切换，避免暂停后又被第二次回调恢复播放。
+    if (lastToggleEvent && (event == lastToggleEvent || event.timestamp == lastToggleEvent.timestamp)) {
+        return MPRemoteCommandHandlerStatusSuccess;
+    }
+    lastToggleEvent = event;
+    // 以 Now Playing 上报的播放速率为准，静态 playing 缓存可能滞后于真实状态，
+    // 会让播放中的双击被当成重复的“播放”而无效。
+    NSNumber *rate = nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate];
+    BOOL isPlaying = rate != nil ? rate.doubleValue != 0.0 : playing;
+    [handlerChannel invokeMethod:(isPlaying ? @"pause" : @"play") arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
@@ -468,13 +510,13 @@ static NSMutableDictionary *nowPlayingInfo = nil;
 }
 
 - (MPRemoteCommandHandlerStatus) nextTrack: (MPRemoteCommandEvent *) event {
-    //NSLog(@"nextTrack");
+    [self recordRemoteCommand:@"nextTrack"];
     [handlerChannel invokeMethod:@"skipToNext" arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
 - (MPRemoteCommandHandlerStatus) previousTrack: (MPRemoteCommandEvent *) event {
-    //NSLog(@"previousTrack");
+    [self recordRemoteCommand:@"previousTrack"];
     [handlerChannel invokeMethod:@"skipToPrevious" arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }

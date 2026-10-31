@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/models/models.dart';
@@ -271,6 +272,63 @@ class _AboutPageState extends State<AboutPage> {
     );
   }
 
+  static const _remoteCommandChannel =
+      MethodChannel('com.ryanheise.audio_service.client.methods');
+
+  /// 诊断入口：列出原生端最近收到的系统媒体命令。
+  /// 耳机按键在 iOS 上可能被系统翻译成不同命令，只有实际记录才能确认。
+  Future<void> _showRemoteCommandLog() async {
+    List<dynamic> entries = const [];
+    String? failure;
+    try {
+      entries = await _remoteCommandChannel
+              .invokeListMethod<dynamic>('getRemoteCommandLog') ??
+          const [];
+    } catch (error) {
+      failure = error.toString();
+    }
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.localeText('媒体命令记录', 'Media command log')),
+        content: SizedBox(
+          width: 520,
+          child: SingleChildScrollView(
+            child: entries.isEmpty
+                ? Text(failure ??
+                    context.localeText(
+                        '暂无记录。播放音频后按耳机按键，再回来查看。',
+                        'No entries yet. Play audio, press the headset button, then check again.'))
+                : SelectableText(
+                    entries
+                        .map((entry) {
+                          final map = entry is Map ? entry : const {};
+                          final command = map['command'] ?? '?';
+                          final playing = map['playing'] == true ? '播放' : '暂停';
+                          final rate = map['rate'];
+                          final paused = map['pauseEnabled'] == true ? '1' : '0';
+                          final played = map['playEnabled'] == true ? '1' : '0';
+                          final toggle = map['toggleEnabled'] == true ? '1' : '0';
+                          final next = map['nextEnabled'] == true ? '1' : '0';
+                          return '$command  状态=$playing  rate=$rate  '
+                              'pause=$paused play=$played toggle=$toggle next=$next';
+                        })
+                        .join('\n'),
+                    style: const TextStyle(fontSize: 12, height: 1.5),
+                  ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(context.localeText('关闭', 'Close')),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _showSnack(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
@@ -309,13 +367,16 @@ class _AboutPageState extends State<AboutPage> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 20),
-                    _AboutVersionRow(
-                      label: context.localeText('客户端版本', 'Client version'),
-                      version: _clientVersion.isEmpty
-                          ? context.localeText('未知', 'Unknown')
-                          : _clientVersion,
-                      checking: _checkingClient,
-                      onCheckUpdate: _checkClientUpdate,
+                    GestureDetector(
+                      onLongPress: _showRemoteCommandLog,
+                      child: _AboutVersionRow(
+                        label: context.localeText('客户端版本', 'Client version'),
+                        version: _clientVersion.isEmpty
+                            ? context.localeText('未知', 'Unknown')
+                            : _clientVersion,
+                        checking: _checkingClient,
+                        onCheckUpdate: _checkClientUpdate,
+                      ),
                     ),
                     if (_downloadingClient) ...[
                       const SizedBox(height: 12),
