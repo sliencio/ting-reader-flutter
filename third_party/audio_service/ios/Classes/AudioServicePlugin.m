@@ -120,6 +120,12 @@ static NSMutableDictionary *nowPlayingInfo = nil;
         commands[8] = commandCenter.changePlaybackPositionCommand;
     }
     [commandCenter.changePlaybackRateCommand setEnabled:YES];
+    // 耳机切换回调与命令的 enabled 状态解耦：激活时无条件注册一次，
+    // 否则 updateControls 里的早退会让部分设备（如一代 AirPods 只上报
+    // 切换手势）的双击事件根本没有接收者。
+    [commandCenter.togglePlayPauseCommand setEnabled:YES];
+    [commandCenter.togglePlayPauseCommand removeTarget:self];
+    [commandCenter.togglePlayPauseCommand addTarget:self action:@selector(togglePlayPause:)];
     lastToggleEvent = nil;
     // TODO: enable more commands
     // Language options
@@ -419,11 +425,9 @@ static NSMutableDictionary *nowPlayingInfo = nil;
             }
             break;
         case APlayPause:
-            // 与其他系统命令统一管理，保证切换回调仅注册一次。
-            [commandCenter.togglePlayPauseCommand removeTarget:self];
-            if (enable) {
-                [commandCenter.togglePlayPauseCommand addTarget:self action:@selector(togglePlayPause:)];
-            }
+            // 回调在 activateCommandCenter 时已无条件注册，这里只维护可用状态，
+            // 避免 enabled 未翻转时提前 return 而永远注册不上。
+            [commandCenter.togglePlayPauseCommand setEnabled:YES];
             break;
         case ASetRepeatMode:
             if (enable) {
@@ -473,8 +477,12 @@ static NSMutableDictionary *nowPlayingInfo = nil;
         return MPRemoteCommandHandlerStatusSuccess;
     }
     lastToggleEvent = event;
-    // 使用与锁屏按钮一致的明确命令，避免跨通道后再判断一次切换方向。
-    [handlerChannel invokeMethod:(playing ? @"pause" : @"play") arguments:@{}];
+    // 以 Now Playing 上报的播放速率为准。一代 AirPods 的双击只上报切换手势，
+    // 方向完全由 app 决定；静态 playing 缓存可能滞后于真实状态，会让播放中
+    // 的双击被当成重复的“播放”而无效。
+    NSNumber *rate = nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate];
+    BOOL isPlaying = rate != nil ? rate.doubleValue != 0.0 : playing;
+    [handlerChannel invokeMethod:(isPlaying ? @"pause" : @"play") arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
