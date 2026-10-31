@@ -297,24 +297,21 @@ class _AboutPageState extends State<AboutPage> {
           child: SingleChildScrollView(
             child: entries.isEmpty
                 ? Text(failure ??
-                    context.localeText(
-                        '暂无记录。播放音频后按耳机按键，再回来查看。',
+                    context.localeText('暂无记录。播放音频后按耳机按键，再回来查看。',
                         'No entries yet. Play audio, press the headset button, then check again.'))
                 : SelectableText(
-                    entries
-                        .map((entry) {
-                          final map = entry is Map ? entry : const {};
-                          final command = map['command'] ?? '?';
-                          final playing = map['playing'] == true ? '播放' : '暂停';
-                          final rate = map['rate'];
-                          final paused = map['pauseEnabled'] == true ? '1' : '0';
-                          final played = map['playEnabled'] == true ? '1' : '0';
-                          final toggle = map['toggleEnabled'] == true ? '1' : '0';
-                          final next = map['nextEnabled'] == true ? '1' : '0';
-                          return '$command  状态=$playing  rate=$rate  '
-                              'pause=$paused play=$played toggle=$toggle next=$next';
-                        })
-                        .join('\n'),
+                    entries.map((entry) {
+                      final map = entry is Map ? entry : const {};
+                      final command = map['command'] ?? '?';
+                      final playing = map['playing'] == true ? '播放' : '暂停';
+                      final rate = map['rate'];
+                      final paused = map['pauseEnabled'] == true ? '1' : '0';
+                      final played = map['playEnabled'] == true ? '1' : '0';
+                      final toggle = map['toggleEnabled'] == true ? '1' : '0';
+                      final next = map['nextEnabled'] == true ? '1' : '0';
+                      return '$command  状态=$playing  rate=$rate  '
+                          'pause=$paused play=$played toggle=$toggle next=$next';
+                    }).join('\n'),
                     style: const TextStyle(fontSize: 12, height: 1.5),
                   ),
           ),
