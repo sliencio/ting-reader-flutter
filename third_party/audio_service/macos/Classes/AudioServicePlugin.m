@@ -123,12 +123,24 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
         commands[8] = commandCenter.changePlaybackPositionCommand;
     }
     [commandCenter.changePlaybackRateCommand setEnabled:YES];
-    // 耳机切换回调与命令的 enabled 状态解耦：激活时无条件注册一次，
-    // 否则 updateControls 里的早退会让部分设备（如一代 AirPods 只上报
-    // 切换手势）的双击事件根本没有接收者。
-    [commandCenter.togglePlayPauseCommand setEnabled:YES];
-    [commandCenter.togglePlayPauseCommand removeTarget:self];
+    // 播放、暂停、切换与上下章命令常驻注册且始终启用。
+    // 这些命令是幂等的：禁用只会让耳机按键的派发被系统吞掉，
+    // 而 removeTarget:nil 会连同自身回调一起移除，之后再启用也无法恢复。
+    for (MPRemoteCommand *command in @[
+        commandCenter.playCommand,
+        commandCenter.pauseCommand,
+        commandCenter.togglePlayPauseCommand,
+        commandCenter.nextTrackCommand,
+        commandCenter.previousTrackCommand,
+    ]) {
+        [command setEnabled:YES];
+        [command removeTarget:self];
+    }
+    [commandCenter.playCommand addTarget:self action:@selector(play:)];
+    [commandCenter.pauseCommand addTarget:self action:@selector(pause:)];
     [commandCenter.togglePlayPauseCommand addTarget:self action:@selector(togglePlayPause:)];
+    [commandCenter.nextTrackCommand addTarget:self action:@selector(nextTrack:)];
+    [commandCenter.previousTrackCommand addTarget:self action:@selector(previousTrack:)];
     lastToggleEvent = nil;
     // TODO: enable more commands
     // Language options
@@ -361,6 +373,14 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
 - (void) updateControl:(enum MediaAction)action {
     MPRemoteCommand *command = commands[action];
     if (command == (id)[NSNull null]) return;
+    // 播放、暂停、切换与上下章命令在 activateCommandCenter 时常驻注册并保持启用，
+    // 不随播放状态反复开关：禁用会让耳机按键的派发被系统吞掉，
+    // 而 removeTarget:nil 会连同自身回调一起移除，后续启用也无法恢复注册。
+    if (action == APlay || action == APause || action == APlayPause ||
+        action == ASkipToNext || action == ASkipToPrevious) {
+        [command setEnabled:YES];
+        return;
+    }
     // Shift the actionBits right until the least significant bit is the tested action bit, and AND that with a 1 at the same position.
     // All bytes become 0, other than the tested action bit, which will be 0 or 1 according to its status in the actionBits long.
     BOOL enable = ((actionBits >> action) & 1);
@@ -376,18 +396,8 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
             }
             break;
         case APause:
-            if (enable) {
-                [commandCenter.pauseCommand addTarget:self action:@selector(pause:)];
-            } else {
-                [commandCenter.pauseCommand removeTarget:nil];
-            }
-            break;
         case APlay:
-            if (enable) {
-                [commandCenter.playCommand addTarget:self action:@selector(play:)];
-            } else {
-                [commandCenter.playCommand removeTarget:nil];
-            }
+            // 已在函数开头常驻注册并保持启用，这里不再重复处理。
             break;
         case ARewind:
             if (rewindInterval.integerValue > 0) {
@@ -443,9 +453,7 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
             }
             break;
         case APlayPause:
-            // 回调在 activateCommandCenter 时已无条件注册，这里只维护可用状态，
-            // 避免 enabled 未翻转时提前 return 而永远注册不上。
-            [commandCenter.togglePlayPauseCommand setEnabled:YES];
+            // 已在函数开头常驻注册并保持启用，这里不再重复处理。
             break;
         case ASetRepeatMode:
             if (enable) {
