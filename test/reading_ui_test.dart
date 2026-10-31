@@ -311,6 +311,24 @@ class _StatisticsApp extends _ReadingApp {
   _ControlledStatisticsApi get api => _statisticsApi;
 }
 
+class _SaveFailureApp extends _ReadingApp {
+  @override
+  Future<SavedServerProfile> rememberServerProfile({
+    required String server,
+    String localServer = '',
+    required String username,
+    required String password,
+    ServerProfileMode mode = ServerProfileMode.direct,
+    String fnId = '',
+    String fnosUsername = '',
+    String fnosPassword = '',
+    String gatewayCookie = '',
+    String fnAccessCode = '',
+    SavedServerProfile? replaceProfile,
+  }) async =>
+      throw StateError('钥匙串不可用');
+}
+
 class _PromptApp extends _ReadingApp {
   _PromptApp(this.twofa);
   final bool twofa;
@@ -420,6 +438,28 @@ Future<void> _pump(
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
+  testWidgets('保存直连资料失败时显示凭据错误，不能静默回到登录页', (tester) async {
+    final app = _SaveFailureApp();
+    final player = _ReadingPlayer();
+    addTearDown(app.dispose);
+    addTearDown(player.dispose);
+    await _pump(tester, app, player, const LoginPage());
+    await tester.tap(find.text('Add').first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Link'));
+    await tester.pumpAndSettle();
+    final fields = find.byType(TextFormField);
+    await tester.enterText(fields.at(0), 'http://127.0.0.1:3000');
+    await tester.enterText(fields.at(2), 'reader');
+    await tester.enterText(fields.at(3), 'password');
+    final submit = find.text('Save and Log In');
+    await tester.ensureVisible(submit);
+    await tester.tap(submit);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Could not securely save sign-in details.'),
+        findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
   testWidgets('直连登录过期时在应用内显示重登提示', (tester) async {
     final app = _ReadingApp()
       ..needsDirectLogin = true

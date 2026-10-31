@@ -379,39 +379,46 @@ class _LoginPageState extends State<LoginPage> {
     );
     if (result == null) return;
     if (!mounted) return;
-    if (result.deleted) {
-      if (profile != null) {
-        await AppScope.appOf(context).deleteSavedServerProfile(profile);
+    try {
+      if (result.deleted) {
+        if (profile != null) {
+          await AppScope.appOf(context).deleteSavedServerProfile(profile);
+        }
+        return;
       }
-      return;
+      final appState = AppScope.appOf(context);
+      final rememberedProfile = await appState.rememberServerProfile(
+        server: result.serverUrl,
+        localServer: result.localServerUrl,
+        username: result.username,
+        password: result.password,
+        mode: result.mode,
+        fnId: result.fnId,
+        fnosUsername: result.fnosUsername,
+        fnosPassword: result.fnosPassword,
+        fnAccessCode: result.fnAccessCode,
+        replaceProfile: profile,
+      );
+      if (!mounted) return;
+      await _login(
+        server: rememberedProfile.serverUrl,
+        localServer: rememberedProfile.localServerUrl,
+        username: rememberedProfile.username,
+        password: rememberedProfile.password,
+        mode: rememberedProfile.mode,
+        fnId: rememberedProfile.fnId,
+        fnosUsername: rememberedProfile.fnosUsername,
+        fnosPassword: rememberedProfile.fnosPassword,
+        fnAccessCode: rememberedProfile.fnAccessCode,
+        activeProfile: rememberedProfile,
+        replaceProfile: profile,
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = context.localeText(
+          '无法安全保存登录资料，请检查系统钥匙串或凭据存储权限后重试。',
+          'Could not securely save sign-in details. Check system keychain or credential storage permissions and try again.'));
     }
-    final appState = AppScope.appOf(context);
-    final rememberedProfile = await appState.rememberServerProfile(
-      server: result.serverUrl,
-      localServer: result.localServerUrl,
-      username: result.username,
-      password: result.password,
-      mode: result.mode,
-      fnId: result.fnId,
-      fnosUsername: result.fnosUsername,
-      fnosPassword: result.fnosPassword,
-      fnAccessCode: result.fnAccessCode,
-      replaceProfile: profile,
-    );
-    if (!mounted) return;
-    await _login(
-      server: rememberedProfile.serverUrl,
-      localServer: rememberedProfile.localServerUrl,
-      username: rememberedProfile.username,
-      password: rememberedProfile.password,
-      mode: rememberedProfile.mode,
-      fnId: rememberedProfile.fnId,
-      fnosUsername: rememberedProfile.fnosUsername,
-      fnosPassword: rememberedProfile.fnosPassword,
-      fnAccessCode: rememberedProfile.fnAccessCode,
-      activeProfile: rememberedProfile,
-      replaceProfile: profile,
-    );
   }
 
   Future<void> _offlineLogin() async {

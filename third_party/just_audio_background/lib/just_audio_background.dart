@@ -750,11 +750,19 @@ class _PlayerAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> skipToQueueItem(int index) async {
-    (await _player).seek(SeekRequest(position: Duration.zero, index: index));
+    await (await _player)
+        .seek(SeekRequest(position: Duration.zero, index: index));
   }
 
   @override
   Future<void> skipToNext() async {
+    // 耳机切章与界面共用片头定位、睡眠定时及失败恢复逻辑。
+    if (_externalNextHandler != null) {
+      if (_externalBool(_externalHasNextHandler)) {
+        await _externalNextHandler!();
+      }
+      return;
+    }
     if (hasNext) {
       await skipToQueueItem(nextIndex);
       return;
@@ -766,6 +774,12 @@ class _PlayerAudioHandler extends BaseAudioHandler
 
   @override
   Future<void> skipToPrevious() async {
+    if (_externalPreviousHandler != null) {
+      if (_externalBool(_externalHasPreviousHandler)) {
+        await _externalPreviousHandler!();
+      }
+      return;
+    }
     if (hasPrevious) {
       await skipToQueueItem(previousIndex);
       return;

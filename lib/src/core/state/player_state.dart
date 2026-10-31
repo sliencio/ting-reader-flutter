@@ -295,8 +295,8 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   bool _volumeInitialized = false;
   bool _speedInitialized = false;
   String? error;
-  // Allow other apps to keep playing audio by default.
-  bool ignoreAudioFocus = true;
+  // iOS 使用系统音频焦点，以维持耳机控制和真实播放状态。
+  bool ignoreAudioFocus = defaultTargetPlatform != TargetPlatform.iOS;
   bool usingLocalFile = false;
   bool _advancingFromOutro = false;
   // Always enabled: an interruption resumes only if playback was active when

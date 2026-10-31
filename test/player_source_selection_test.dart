@@ -8,6 +8,7 @@ import 'package:audio_service_platform_interface/audio_service_platform_interfac
 import 'package:audio_service_platform_interface/method_channel_audio_service.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -527,6 +528,49 @@ void main() {
     await waitForPlayback(() => player.currentChapter?.id == second.id);
     notifications.sendCommand('skipToPrevious');
     await waitForPlayback(() => player.currentChapter?.id == first.id);
+  });
+
+  test('iOS 旧混音设置不能关闭音频焦点，中断后暂停并可由耳机继续', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    app.settings = {'ignore_audio_focus': true};
+    native.holdPlayback = true;
+    final item = chapter('/data/chapter.mp3');
+    unawaited(player.playChapter(book, [item], item));
+    await waitForPlayback(() => player.isPlaying && native.playCount == 1);
+    expect(player.ignoreAudioFocus, isFalse);
+    final session = await AudioSession.instance;
+    expect(session.configuration?.avAudioSessionCategoryOptions,
+        AVAudioSessionCategoryOptions.none);
+    interruptions
+        .add(AudioInterruptionEvent(true, AudioInterruptionType.pause));
+    await waitForPlayback(() => !player.isPlaying && native.pauseCount == 1);
+    interruptions
+        .add(AudioInterruptionEvent(false, AudioInterruptionType.pause));
+    await waitForPlayback(() => player.isPlaying && native.playCount == 2);
+    notifications.clickHeadset();
+    await waitForPlayback(() => !player.isPlaying);
+    notifications.clickHeadset();
+    await waitForPlayback(() => player.isPlaying && native.playCount == 3);
+    debugDefaultTargetPlatformOverride = null;
+  });
+
+  test('耳机切章使用应用片头定位，不能绕过控制器直接从零开始', () async {
+    native.holdPlayback = true;
+    native.emitSeeks = true;
+    await player.savePlaybackSettings(book, 30, 15);
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    await player.playChapter(book, [first, second], first);
+    notifications.sendCommand('skipToNext');
+    await waitForPlayback(() =>
+        player.currentChapter?.id == second.id &&
+        native.seeks.isNotEmpty &&
+        native.seeks.last['index'] == null);
+    expect(native.seeks.last['position'], 30000000);
+    notifications.sendCommand('skipToPrevious');
+    await waitForPlayback(() => player.currentChapter?.id == first.id);
+    expect(native.seeks.last['position'], 30000000);
   });
 
   String resumeIdentity() => '${app.serverUrl}:${app.fnId}:${app.user?.id}';

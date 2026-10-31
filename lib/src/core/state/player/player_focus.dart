@@ -12,6 +12,8 @@ extension _PlayerAudioFocus on PlayerState {
   }
 
   Future<void> _setAudioFocusPolicy(bool value) async {
+    // iOS 必须保留系统音频焦点和中断处理，否则耳机控制会失效，失去输出后界面仍可能继续计时。
+    if (defaultTargetPlatform == TargetPlatform.iOS) value = false;
     if (!kIsWeb) {
       audio_background.JustAudioBackground.setAudioFocusEnabled(
         !value || defaultTargetPlatform != TargetPlatform.android,
