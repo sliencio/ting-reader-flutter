@@ -289,13 +289,20 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
 
 - (MPRemoteCommandHandlerStatus) play: (MPRemoteCommandEvent *) event {
     [self recordRemoteCommand:@"play"];
-    [handlerChannel invokeMethod:@"play" arguments:@{}];
+    // 部分耳机在播放中双击只派发 play 命令，直接执行等于空操作。
+    // 此时按切换语义处理，保证双击在两种状态下都能生效。
+    NSNumber *rate = nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate];
+    BOOL isPlaying = rate != nil ? rate.doubleValue != 0.0 : playing;
+    [handlerChannel invokeMethod:(isPlaying ? @"pause" : @"play") arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
 - (MPRemoteCommandHandlerStatus) pause: (MPRemoteCommandEvent *) event {
     [self recordRemoteCommand:@"pause"];
-    [handlerChannel invokeMethod:@"pause" arguments:@{}];
+    // 与 play 对称：已暂停时收到 pause 视为继续播放。
+    NSNumber *rate = nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate];
+    BOOL isPlaying = rate != nil ? rate.doubleValue != 0.0 : playing;
+    [handlerChannel invokeMethod:(isPlaying ? @"pause" : @"play") arguments:@{}];
     return MPRemoteCommandHandlerStatusSuccess;
 }
 
