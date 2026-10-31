@@ -2,6 +2,11 @@ name: Build Releases
 
 on:
   workflow_dispatch:
+    inputs:
+      republish_153:
+        description: '使用当前源码替换 1.5.3 安装包，保留现有发布说明'
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -21,6 +26,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: 检查同版本补发目标
+        if: inputs.republish_153 == true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test "$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)" = '1.5.3'
+          gh release view v1.5.3 --json name,body > /tmp/release-153-before.json
       - name: 检查发布版本
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
@@ -146,8 +158,9 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          REPUBLISH_153: ${{ inputs.republish_153 == true }}
         run: |
-          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+          if [[ "${GITHUB_REF}" == refs/tags/v* || "$REPUBLISH_153" == 'true' ]]; then
             test -n "$ANDROID_KEYSTORE_BASE64"
             test -n "$ANDROID_KEYSTORE_PASSWORD"
             test -n "$ANDROID_KEY_ALIAS"
@@ -332,7 +345,7 @@ jobs:
     name: Publish GitHub Release
     needs: [android, windows, linux, macos, ios]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.republish_153 == true
     steps:
       - uses: actions/checkout@v4
         with:
@@ -342,6 +355,7 @@ jobs:
           path: dist
           merge-multiple: true
       - name: 读取发布说明
+        if: inputs.republish_153 != true
         env:
           RELEASE_VERSION: ${{ github.ref_name }}
         run: |
@@ -362,6 +376,7 @@ jobs:
           Path("release-notes.md").write_text(notes + "\n", encoding="utf-8")
           PY
       - name: 发布安装包
+        if: inputs.republish_153 != true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
@@ -374,3 +389,16 @@ jobs:
               --title "Ting Reader Flutter $RELEASE_TAG" \
               --notes-file release-notes.md
           fi
+      - name: 替换 1.5.3 安装包并保留发布内容
+        if: inputs.republish_153 == true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test "$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)" = '1.5.3'
+          for file in ting-reader-flutter-android.apk ting-reader-flutter-android.aab TingReader-windows-x64-setup.exe TingReader-linux-x64.tar.gz TingReader-macos.zip TingReader-ios-self-sign.ipa pubspec.lock; do
+            test -s "dist/$file"
+          done
+          gh release view v1.5.3 --json name,body > /tmp/release-before.json
+          gh release upload v1.5.3 dist/* --clobber
+          gh release view v1.5.3 --json name,body > /tmp/release-after.json
+          cmp /tmp/release-before.json /tmp/release-after.json
