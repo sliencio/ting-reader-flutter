@@ -11,6 +11,10 @@ on:
         description: '仅重建并替换 iOS 1.5.3，保留其他平台附件及发布说明'
         type: boolean
         default: false
+      apple_only_153:
+        description: '仅补发 iPhone 和 Mac 1.5.3，保留其他附件及发布说明'
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -31,7 +35,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: 检查同版本补发目标
-        if: inputs.republish_153 == true || inputs.ios_only_153 == true
+        if: inputs.republish_153 == true || inputs.ios_only_153 == true || inputs.apple_only_153 == true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -117,7 +121,7 @@ jobs:
 
   android:
     name: Android
-    if: inputs.ios_only_153 != true
+    if: inputs.ios_only_153 != true && inputs.apple_only_153 != true
     needs: [dependencies, quality]
     runs-on: ubuntu-latest
     steps:
@@ -194,7 +198,7 @@ jobs:
 
   windows:
     name: Windows
-    if: inputs.ios_only_153 != true
+    if: inputs.ios_only_153 != true && inputs.apple_only_153 != true
     needs: [dependencies, quality]
     runs-on: windows-2022
     steps:
@@ -234,7 +238,7 @@ jobs:
 
   linux:
     name: Linux
-    if: inputs.ios_only_153 != true
+    if: inputs.ios_only_153 != true && inputs.apple_only_153 != true
     needs: [dependencies, quality]
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -274,7 +278,7 @@ jobs:
 
   macos:
     name: macOS
-    if: inputs.ios_only_153 != true
+    if: inputs.ios_only_153 != true || inputs.apple_only_153 == true
     needs: [dependencies, quality]
     runs-on: macos-26
     env:
@@ -359,7 +363,7 @@ jobs:
     name: Publish GitHub Release
     needs: [android, windows, linux, macos, ios]
     runs-on: ubuntu-latest
-    if: inputs.ios_only_153 != true && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.republish_153 == true)
+    if: inputs.ios_only_153 != true && inputs.apple_only_153 != true && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || inputs.republish_153 == true)
     steps:
       - uses: actions/checkout@v4
         with:
@@ -420,7 +424,7 @@ jobs:
   release_ios_153:
     name: 仅补发 iOS 1.5.3
     needs: [ios]
-    if: inputs.ios_only_153 == true
+    if: inputs.ios_only_153 == true && inputs.apple_only_153 != true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -437,4 +441,31 @@ jobs:
           gh release view v1.5.3 --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa")]}' > /tmp/release-before.json
           gh release upload v1.5.3 dist/TingReader-ios-self-sign.ipa --clobber
           gh release view v1.5.3 --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa")]}' > /tmp/release-after.json
+          cmp /tmp/release-before.json /tmp/release-after.json
+
+  release_apple_153:
+    name: 仅补发 iPhone 和 Mac 1.5.3
+    needs: [ios, macos]
+    if: inputs.apple_only_153 == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: ios
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: macos
+          path: dist
+      - name: 替换 Apple 安装包并核对其他发布内容
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          test "$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)" = '1.5.3'
+          test -s dist/TingReader-ios-self-sign.ipa
+          test -s dist/TingReader-macos.zip
+          gh release view v1.5.3 --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa" and .name != "TingReader-macos.zip")]}' > /tmp/release-before.json
+          gh release upload v1.5.3 dist/TingReader-ios-self-sign.ipa dist/TingReader-macos.zip --clobber
+          gh release view v1.5.3 --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa" and .name != "TingReader-macos.zip")]}' > /tmp/release-after.json
           cmp /tmp/release-before.json /tmp/release-after.json

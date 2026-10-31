@@ -23,7 +23,7 @@ assert 'keychain-access-groups' not in entitlements, '独立发行包不能申�
 assert not entitlements.get('com.apple.security.get-task-allow'), '发行包不能携带调试权限'
 PY
 executable="$(/usr/libexec/PlistBuddy -c 'Print CFBundleExecutable' "$app/Contents/Info.plist")"
-lipo -verify_arch arm64 "$app/Contents/MacOS/$executable"
+lipo "$app/Contents/MacOS/$executable" -verify_arch arm64
 if [[ "${2:-}" == '--smoke' ]]; then
   "$app/Contents/MacOS/$executable" > "$temporary/launch.log" 2>&1 &
   pid=$!
