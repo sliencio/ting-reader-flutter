@@ -286,6 +286,9 @@ extension _PlayerSources on PlayerState {
             appState.usesActiveOrigin(artUri.toString())
         ? _streamHeaders
         : null;
+    // iOS 依据 Now Playing 的队列信息决定耳机切歌手势是否可用，
+    // 不上报时系统会把它当成单曲播放，右耳「下一曲」双击被直接丢弃。
+    final chapterIndex = chapters.indexWhere((item) => item.id == chapter.id);
     return MediaItem(
       id: chapter.id,
       album: book.title,
@@ -298,6 +301,8 @@ extension _PlayerSources on PlayerState {
       extras: {
         'bookId': book.id,
         'chapterId': chapter.id,
+        if (chapterIndex >= 0) 'queueIndex': chapterIndex,
+        if (chapters.isNotEmpty) 'queueCount': chapters.length,
         if (streamOffset > 0) 'streamOffsetSeconds': streamOffset,
       },
     );

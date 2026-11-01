@@ -275,6 +275,7 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
     // 命令中心是进程级单例，静态变量会在 stopService 时被置空，
     // 直接读共享实例才能反映真实启用状态。
     MPRemoteCommandCenter *center = [MPRemoteCommandCenter sharedCommandCenter];
+    NSDictionary *info = [MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo;
     [remoteCommandLog addObject:@{
         @"command": command,
         @"playing": @(playing),
@@ -283,6 +284,8 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
         @"playEnabled": @(center.playCommand.isEnabled),
         @"toggleEnabled": @(center.togglePlayPauseCommand.isEnabled),
         @"nextEnabled": @(center.nextTrackCommand.isEnabled),
+        @"queueCount": info[MPNowPlayingInfoPropertyPlaybackQueueCount] ?: [NSNull null],
+        @"queueIndex": info[MPNowPlayingInfoPropertyPlaybackQueueIndex] ?: [NSNull null],
         @"active": @([MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo != nil),
         @"at": @((long long)([[NSDate date] timeIntervalSince1970] * 1000.0)),
     }];
@@ -351,6 +354,19 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
 
     if (@available(iOS 10.0, macOS 10.12.2, *)) {
         updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyMediaType value:@(MPNowPlayingInfoMediaTypeAudio)];
+        // 耳机双击「上一曲/下一曲」的手势是否可用由系统按队列信息判断。
+        // 不上报队列数量时，系统视作单曲播放，切歌命令不会派发到 app。
+        id extras = mediaItem[@"extras"];
+        if (extras != nil && extras != [NSNull null]) {
+            id queueCount = extras[@"queueCount"];
+            id queueIndex = extras[@"queueIndex"];
+            if (queueCount != nil && queueCount != [NSNull null]) {
+                updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyPlaybackQueueCount value:queueCount];
+            }
+            if (queueIndex != nil && queueIndex != [NSNull null]) {
+                updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyPlaybackQueueIndex value:queueIndex];
+            }
+        }
     }
     updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyPlaybackRate value:(playing ? speed : [NSNumber numberWithDouble: 0.0])];
     updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyElapsedPlaybackTime value:[NSNumber numberWithDouble:([position doubleValue] / 1000)]];
