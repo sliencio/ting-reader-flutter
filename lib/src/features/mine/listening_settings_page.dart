@@ -4,6 +4,7 @@ import '../../core/api/api_error.dart';
 import '../../core/services/desktop_window.dart';
 import '../../core/state/navigation_state.dart';
 import '../../core/plugin_extensions/types.dart';
+import '../../core/theme/app_theme.dart';
 import '../../shared/plugin_extensions/plugin_extension_host.dart';
 import '../../core/utils/locale.dart';
 import '../../shared/app_scope.dart';
@@ -46,8 +47,16 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
   Widget build(BuildContext context) {
     final app = AppScope.appOf(context);
     Widget action(IconData icon, String title, VoidCallback? onTap,
-        {bool selected = false, Widget? leadingIcon}) {
-      final leading = leadingIcon ?? Icon(icon, size: 24);
+        {bool selected = false,
+        Widget? leadingIcon,
+        Color? accent,
+        String? subtitle}) {
+      final tint = accent ?? Theme.of(context).colorScheme.primary;
+      final leading = _SettingsIconBadge(
+        icon: icon,
+        accent: tint,
+        child: leadingIcon,
+      );
       return Tooltip(
         message: title,
         child: widget.compact
@@ -59,32 +68,117 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                         ? Theme.of(context).colorScheme.secondaryContainer
                         : Colors.transparent,
                   ),
-                  icon: leading,
+                  icon: leadingIcon ?? Icon(icon, size: 24),
                   isSelected: selected,
                   onPressed: onTap,
                 ),
               )
-            : ListTile(
-                leading: leading,
-                title: Text(title),
-                selected: selected,
+            : InkWell(
                 onTap: onTap,
+                child: Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                  child: Row(
+                    children: [
+                      leading,
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: 14.5,
+                                fontWeight: selected
+                                    ? FontWeight.w600
+                                    : FontWeight.w500,
+                                color: selected
+                                    ? Theme.of(context).colorScheme.primary
+                                    : context.primaryText,
+                              ),
+                            ),
+                            if (subtitle != null) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitle,
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.mutedText,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                        color: context.mutedText.withValues(alpha: 0.6),
+                      ),
+                    ],
+                  ),
+                ),
               ),
       );
     }
 
-    Widget entry(IconData icon, String title, AppDestination destination) =>
+    Widget entry(IconData icon, String title, AppDestination destination,
+            {Color? accent}) =>
         action(icon, title, () => widget.go(destination),
-            selected: widget.currentDestination == destination);
+            selected: widget.currentDestination == destination, accent: accent);
 
-    Widget group(List<Widget> children) => widget.compact
-        ? Column(children: children)
-        : Card(
-            elevation: 0,
+    Widget group(List<Widget> children, {String? title}) {
+      if (widget.compact) return Column(children: children);
+      final rows = <Widget>[];
+      for (var i = 0; i < children.length; i++) {
+        if (i > 0) {
+          rows.add(Divider(
+            height: 1,
+            thickness: 1,
+            indent: 62,
+            color: context.faintBorder.withValues(alpha: 0.7),
+          ));
+        }
+        rows.add(children[i]);
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (title != null)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(6, 4, 6, 8),
+              child: Text(
+                title,
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  letterSpacing: 0.4,
+                  color: context.mutedText,
+                ),
+              ),
+            ),
+          Container(
+            margin: const EdgeInsets.only(bottom: 20),
             clipBehavior: Clip.antiAlias,
-            margin: const EdgeInsets.only(bottom: 16),
-            child: Column(children: children),
-          );
+            decoration: BoxDecoration(
+              color: context.cardColor,
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: context.faintBorder),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black
+                      .withValues(alpha: context.isDark ? 0.14 : 0.03),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(children: rows),
+          ),
+        ],
+      );
+    }
 
     return ListView(
       padding: EdgeInsets.all(widget.compact ? 8 : 16),
@@ -115,7 +209,7 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                 AppDestination.account),
             if (app.activeProfile?.isFnosGateway == true)
               entry(Icons.lan_outlined, 'FN Connect', AppDestination.fnConnect),
-          ]),
+          ], title: context.localeText('偏好设置', 'Preferences')),
           group([
             entry(
                 Icons.history_rounded,
@@ -133,7 +227,7 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                 Icons.playlist_play_rounded,
                 context.localeText('书单', 'Playlists'),
                 AppDestination.playlists),
-          ]),
+          ], title: context.localeText('我的收藏', 'My library')),
           if (app.isAdmin || widget.pluginPages.isNotEmpty)
             group([
               if (app.isAdmin) ...[
@@ -168,13 +262,13 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                     selected: widget.activePluginPageId == extension.id,
                     leadingIcon:
                         PluginExtensionIcon(extension: extension, size: 24)),
-            ]),
+            ], title: context.localeText('服务端管理', 'Server management')),
           group([
             entry(
                 Icons.info_outline_rounded,
                 context.localeText('关于听悦', 'About Ting Reader'),
                 AppDestination.about),
-          ]),
+          ], title: context.localeText('其他', 'More')),
         ],
         group([
           action(
@@ -190,6 +284,38 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
                 DesktopWindow.instance.requestExit),
         ]),
       ],
+    );
+  }
+}
+
+/// 设置项的圆角图标徽章：浅色底加同色系图标，比裸图标更容易扫读。
+class _SettingsIconBadge extends StatelessWidget {
+  const _SettingsIconBadge({
+    required this.icon,
+    required this.accent,
+    this.child,
+  });
+
+  final IconData icon;
+  final Color accent;
+  final Widget? child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 34,
+      height: 34,
+      decoration: BoxDecoration(
+        color: accent.withValues(alpha: context.isDark ? 0.22 : 0.12),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      alignment: Alignment.center,
+      child: SizedBox.square(
+        dimension: 20,
+        child: child != null
+            ? FittedBox(child: child)
+            : Icon(icon, size: 19, color: accent),
+      ),
     );
   }
 }
