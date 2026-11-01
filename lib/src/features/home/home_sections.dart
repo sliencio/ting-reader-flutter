@@ -177,22 +177,46 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: iconColor, size: 25),
-        const SizedBox(width: 8),
         Expanded(
-          child: Text(
-            title,
-            style: const TextStyle(fontSize: 24),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 20,
+                  height: 1.2,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.3,
+                  color: context.primaryText,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Container(
+                width: 28,
+                height: 3,
+                decoration: BoxDecoration(
+                  color: iconColor.withValues(alpha: 0.85),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ],
           ),
         ),
         TextButton(
           onPressed: onAction,
+          style: TextButton.styleFrom(
+            foregroundColor: context.mutedText,
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            minimumSize: const Size(0, 36),
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(action),
+              Text(action, style: const TextStyle(fontSize: 13)),
               const SizedBox(width: 2),
-              const Icon(Icons.chevron_right_rounded, size: 18),
+              const Icon(Icons.chevron_right_rounded, size: 17),
             ],
           ),
         ),

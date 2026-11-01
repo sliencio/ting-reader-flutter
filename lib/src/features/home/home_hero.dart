@@ -18,106 +18,95 @@ class _HomeHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          greetingForLocale(context, now: date),
-          style: const TextStyle(
-            color: AppColors.primary600,
-            fontSize: 14,
-            fontWeight: FontWeight.w700,
+          '$dateText · ${greetingForLocale(context, now: date)}',
+          style: TextStyle(
+            color: context.mutedText,
+            fontSize: 13,
+            fontWeight: FontWeight.w600,
+            letterSpacing: 0.3,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 6),
         Text(
           context.localeText('今天听点什么', 'What shall we hear today?'),
           style: TextStyle(
             color: context.primaryText,
-            fontSize: 36,
-            height: 1.1,
+            fontSize: compact ? 28 : 34,
+            height: 1.12,
             fontWeight: FontWeight.w700,
+            letterSpacing: -0.6,
           ),
-        ),
-        const SizedBox(height: 10),
-        Text(
-          context.localeText(
-            '推荐、最近、书单和你的听书节奏都在这里。',
-            'Recommendations, recents, playlists, and your listening rhythm.',
-          ),
-          style: TextStyle(color: context.mutedText, fontSize: 16),
         ),
       ],
     );
 
-    final actions = Wrap(
-      spacing: 10,
-      runSpacing: 10,
-      alignment: compact ? WrapAlignment.start : WrapAlignment.end,
-      children: [
-        SizedBox(
-          height: 48,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            decoration: BoxDecoration(
-              color: context.cardColor,
-              border: Border.all(color: context.faintBorder),
-              borderRadius: BorderRadius.circular(12),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.05),
-                  blurRadius: 10,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.calendar_today_rounded,
-                    size: 16, color: AppColors.slate500),
-                const SizedBox(width: 8),
-                Text(
-                  dateText,
-                  style: TextStyle(color: context.mutedText, fontSize: 14),
-                ),
-              ],
-            ),
-          ),
-        ),
-        FilledButton.icon(
-          onPressed: onSearch,
-          style: FilledButton.styleFrom(
-            backgroundColor:
-                context.isDark ? AppColors.primary600 : AppColors.slate950,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(0, 48),
-            padding: const EdgeInsets.symmetric(horizontal: 18),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-          icon: const Icon(Icons.search_rounded, size: 20),
-          label: Text(
-            context.localeText('搜索内容', 'Search'),
-            style: const TextStyle(fontWeight: FontWeight.w700),
-          ),
-        ),
-      ],
-    );
+    final actions = compact
+        ? SizedBox(
+            width: double.infinity,
+            child: _HomeSearchBar(onSearch: onSearch),
+          )
+        : _HomeSearchBar(onSearch: onSearch, width: 280);
 
     if (compact) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           title,
-          const SizedBox(height: 18),
+          const SizedBox(height: 16),
           actions,
         ],
       );
     }
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
         Expanded(child: title),
         const SizedBox(width: 20),
         actions,
       ],
+    );
+  }
+}
+
+/// 主页搜索入口：胶囊形浅底条，与书架页的搜索框保持一致。
+class _HomeSearchBar extends StatelessWidget {
+  const _HomeSearchBar({required this.onSearch, this.width});
+
+  final VoidCallback onSearch;
+  final double? width;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: width,
+      height: 46,
+      child: Material(
+        color: context.isDark
+            ? AppColors.slate800.withValues(alpha: 0.65)
+            : AppColors.slate100,
+        borderRadius: BorderRadius.circular(23),
+        child: InkWell(
+          onTap: onSearch,
+          borderRadius: BorderRadius.circular(23),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Icon(Icons.search_rounded, size: 20, color: context.mutedText),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    context.localeText('搜索书名、作者、演播者', 'Search audiobooks'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(color: context.mutedText, fontSize: 14),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
