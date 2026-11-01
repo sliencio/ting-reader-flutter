@@ -356,10 +356,10 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
         updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyMediaType value:@(MPNowPlayingInfoMediaTypeAudio)];
         // 耳机双击「上一曲/下一曲」的手势是否可用由系统按队列信息判断。
         // 不上报队列数量时，系统视作单曲播放，切歌命令不会派发到 app。
-        id extras = mediaItem[@"extras"];
+        id extras = [mediaItem objectForKey:@"extras"];
         if (extras != nil && extras != [NSNull null]) {
-            id queueCount = extras[@"queueCount"];
-            id queueIndex = extras[@"queueIndex"];
+            id queueCount = [extras objectForKey:@"queueCount"];
+            id queueIndex = [extras objectForKey:@"queueIndex"];
             if (queueCount != nil && queueCount != [NSNull null]) {
                 updated |= [self updateNowPlayingField:MPNowPlayingInfoPropertyPlaybackQueueCount value:queueCount];
             }
