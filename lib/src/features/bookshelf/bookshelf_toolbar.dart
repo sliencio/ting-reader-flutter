@@ -1,5 +1,45 @@
 part of 'bookshelf_page.dart';
 
+/// 书架主标题：大号粗标题配一行说明，取代带图标的卡片式页头。
+class _ShelfTitle extends StatelessWidget {
+  const _ShelfTitle({required this.selectionMode});
+
+  final bool selectionMode;
+
+  @override
+  Widget build(BuildContext context) {
+    final phone = MediaQuery.sizeOf(context).width < 560;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.localeText('我的书架', 'My Bookshelf'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: phone ? 26 : 32,
+            height: 1.15,
+            fontWeight: FontWeight.w700,
+            letterSpacing: -0.5,
+            color: context.primaryText,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          selectionMode
+              ? context.localeText(
+                  '选择书籍后可批量操作', 'Select books to act on many at once')
+              : context.localeText('发现您收藏的所有有声读物。',
+                  'Browse every audiobook in your collection.'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: 13, color: context.mutedText),
+        ),
+      ],
+    );
+  }
+}
+
 class _Header extends StatelessWidget {
   const _Header({
     required this.selectionMode,
@@ -201,34 +241,23 @@ class _Header extends StatelessWidget {
         return Stack(
           clipBehavior: Clip.none,
           children: [
-            compact
-                ? Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      HeaderText(
-                        icon: Icons.library_books_rounded,
-                        title: context.localeText('我的书架', 'My Bookshelf'),
-                        subtitle: context.localeText('发现您收藏的所有有声读物。',
-                            'Browse every audiobook in your collection.'),
-                      ),
-                      const SizedBox(height: 16),
-                      compactToolbar(),
-                    ],
-                  )
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    children: [
-                      Expanded(
-                        child: HeaderText(
-                          icon: Icons.library_books_rounded,
-                          title: context.localeText('我的书架', 'My Bookshelf'),
-                          subtitle: context.localeText('发现您收藏的所有有声读物。',
-                              'Browse every audiobook in your collection.'),
-                        ),
-                      ),
-                      desktopToolbar,
-                    ],
-                  ),
+            if (compact)
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _ShelfTitle(selectionMode: selectionMode),
+                  const SizedBox(height: 14),
+                  compactToolbar(),
+                ],
+              )
+            else
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Expanded(child: _ShelfTitle(selectionMode: selectionMode)),
+                  desktopToolbar,
+                ],
+              ),
           ],
         );
       },
@@ -480,19 +509,19 @@ class _SearchEntry extends StatelessWidget {
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(24),
         child: Container(
-          height: 48,
+          height: 46,
           padding: const EdgeInsets.symmetric(horizontal: 16),
           decoration: BoxDecoration(
-            color: context.cardColor,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: context.faintBorder),
+            color: context.isDark
+                ? AppColors.slate800.withValues(alpha: 0.65)
+                : AppColors.slate100,
+            borderRadius: BorderRadius.circular(24),
           ),
           child: Row(
             children: [
-              const Icon(Icons.search_rounded,
-                  size: 20, color: AppColors.slate500),
+              Icon(Icons.search_rounded, size: 20, color: context.mutedText),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -594,24 +623,24 @@ class _SquareToolbarButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = selected ? AppColors.primary600 : context.faintBorder;
+    final accent = Theme.of(context).colorScheme.primary;
     return Material(
-      color: context.cardColor,
-      borderRadius: BorderRadius.circular(12),
+      color: selected
+          ? accent.withValues(alpha: context.isDark ? 0.24 : 0.12)
+          : (context.isDark
+              ? AppColors.slate800.withValues(alpha: 0.65)
+              : AppColors.slate100),
+      borderRadius: BorderRadius.circular(23),
       child: InkWell(
         onTap: onPressed,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          width: 48,
-          height: 48,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: borderColor, width: selected ? 2 : 1),
-          ),
+        borderRadius: BorderRadius.circular(23),
+        child: SizedBox(
+          width: 46,
+          height: 46,
           child: Icon(
             icon,
-            size: 22,
-            color: selected ? AppColors.primary600 : AppColors.slate600,
+            size: 21,
+            color: selected ? accent : context.mutedText,
           ),
         ),
       ),

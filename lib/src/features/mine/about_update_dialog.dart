@@ -309,8 +309,11 @@ class _AboutPageState extends State<AboutPage> {
                       final played = map['playEnabled'] == true ? '1' : '0';
                       final toggle = map['toggleEnabled'] == true ? '1' : '0';
                       final next = map['nextEnabled'] == true ? '1' : '0';
+                      final queueCount = map['queueCount'];
+                      final queueIndex = map['queueIndex'];
                       return '$command  状态=$playing  rate=$rate  '
-                          'pause=$paused play=$played toggle=$toggle next=$next';
+                          'pause=$paused play=$played toggle=$toggle next=$next  '
+                          'queue=$queueCount idx=$queueIndex';
                     }).join('\n'),
                     style: const TextStyle(fontSize: 12, height: 1.5),
                   ),
