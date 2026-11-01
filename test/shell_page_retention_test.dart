@@ -257,10 +257,12 @@ void main() {
   for (final width in [390.0, 1440.0]) {
     testWidgets('admin entries open directly from settings at $width',
         (tester) async {
+      final mobile = width < 840;
       await _pump(tester, Size(width, 1000), admin: true);
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
-      final bounds = tester.getRect(find.byType(ListeningSettingsPage));
+      final bounds =
+          mobile ? null : tester.getRect(find.byType(ListeningSettingsPage));
       expect(find.byTooltip('Server & extensions'), findsNothing);
       for (final target in [
         ('Libraries', AdminLibrariesPage),
@@ -272,8 +274,15 @@ void main() {
         expect(tester.takeException(), isNull, reason: target.$1);
         expect(find.byType(target.$2), findsOneWidget);
         expect(find.byType(Drawer), findsNothing);
-        expect(tester.getRect(find.byType(ListeningSettingsPage)), bounds);
-        expect(find.byTooltip('Close settings'), findsOneWidget);
+        if (mobile) {
+          // 窄屏设置整页打开，选中条目后离开设置页进入目标页。
+          expect(find.byType(ListeningSettingsPage), findsNothing);
+          await tester.tap(find.byTooltip('Settings'));
+          await tester.pumpAndSettle();
+        } else {
+          expect(tester.getRect(find.byType(ListeningSettingsPage)), bounds);
+          expect(find.byTooltip('Close settings'), findsOneWidget);
+        }
       }
       expect(tester.takeException(), isNull);
     });
@@ -298,25 +307,58 @@ void main() {
       await _pump(tester, size);
       expect(find.byTooltip('Mini window'), findsNothing);
       expect(find.byType(NavigationBar), findsNothing);
+      final mobile = size.width < 840;
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       final menu = tester.element(find.byType(ListeningSettingsPage));
-      final bounds = tester.getRect(find.byType(ListeningSettingsPage));
+      final bounds =
+          mobile ? null : tester.getRect(find.byType(ListeningSettingsPage));
       expect(find.byTooltip('Window behavior'), findsNothing);
       expect(find.byTooltip('Exit application'), findsNothing);
-      for (final target in [
-        ('Playback & appearance', PersonalizationPage),
-        ('Favorites', FavoritesPage),
-        ('Downloads', DownloadsPage),
-        ('Bookshelf', BookshelfPage),
-      ]) {
+      // 窄屏把「下载 / 书架」放在底部标签栏，不再重复进设置页。
+      final settingsTargets = mobile
+          ? [
+              ('Playback & appearance', PersonalizationPage),
+              ('Favorites', FavoritesPage),
+            ]
+          : [
+              ('Playback & appearance', PersonalizationPage),
+              ('Favorites', FavoritesPage),
+              ('Downloads', DownloadsPage),
+              ('Bookshelf', BookshelfPage),
+            ];
+      for (final target in settingsTargets) {
         await _select(tester, target.$1);
         expect(find.byType(target.$2), findsOneWidget);
-        expect(tester.getRect(find.byType(ListeningSettingsPage)), bounds);
-        expect(
-            identical(tester.element(find.byType(ListeningSettingsPage)), menu),
-            isTrue);
+        if (mobile) {
+          // 窄屏设置整页打开，选中条目后离开设置页。
+          expect(find.byType(ListeningSettingsPage), findsNothing);
+          await tester.tap(find.byTooltip('Settings'));
+          await tester.pumpAndSettle();
+          expect(find.byType(ListeningSettingsPage), findsOneWidget);
+          expect(find.byTooltip('Playback & appearance'), findsOneWidget);
+        } else {
+          expect(tester.getRect(find.byType(ListeningSettingsPage)), bounds);
+          expect(
+              identical(
+                  tester.element(find.byType(ListeningSettingsPage)), menu),
+              isTrue);
+        }
         expect(tester.takeException(), isNull, reason: target.$1);
+      }
+      if (mobile) {
+        // 底部标签栏直接切换书架与下载，设置关闭。
+        await tester.tap(find.byTooltip('Close settings'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Downloads'));
+        await tester.pumpAndSettle();
+        expect(find.byType(DownloadsPage), findsOneWidget);
+        await tester.tap(find.byTooltip('Bookshelf'));
+        await tester.pumpAndSettle();
+        expect(find.byType(BookshelfPage), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        debugDefaultTargetPlatformOverride = null;
+        return;
       }
       await tester.tap(find.byTooltip('Close settings'));
       await tester.pumpAndSettle();
@@ -332,10 +374,22 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.windows;
       try {
         final (app, _) = await _pump(tester, Size(width, 1000));
-        await tester.tap(find.byTooltip('Settings'));
-        await tester.pumpAndSettle();
+        final mobile = width < 840;
+        Future<void> openSettings() async {
+          await tester.tap(find.byTooltip('Settings'));
+          await tester.pumpAndSettle();
+        }
+
+        Future<void> ensureSettings() async {
+          if (mobile && find.byType(ListeningSettingsPage).evaluate().isEmpty) {
+            await openSettings();
+          }
+        }
+
+        await openSettings();
         final menu = tester.element(find.byType(ListeningSettingsPage));
-        final menuBounds = tester.getRect(find.byType(ListeningSettingsPage));
+        final menuBounds =
+            mobile ? null : tester.getRect(find.byType(ListeningSettingsPage));
         expect(
             find.descendant(
                 of: find.byType(ListeningSettingsPage),
@@ -348,12 +402,20 @@ void main() {
                 of: find.byType(WindowSettingsPage),
                 matching: find.byType(WindowCaptionIcon)),
             findsOneWidget);
-        expect(tester.getRect(find.byType(WindowSettingsPage)).left,
-            greaterThan(menuBounds.right - 1));
-        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
-        expect(
-            identical(tester.element(find.byType(ListeningSettingsPage)), menu),
-            isTrue);
+        if (mobile) {
+          // 窄屏设置整页打开，选中条目后离开设置页并把内容铺满。
+          expect(find.byType(ListeningSettingsPage), findsNothing);
+          expect(tester.getRect(find.byType(WindowSettingsPage)).left, 0);
+        } else {
+          expect(tester.getRect(find.byType(WindowSettingsPage)).left,
+              greaterThan(menuBounds!.right - 1));
+          expect(
+              tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+          expect(
+              identical(
+                  tester.element(find.byType(ListeningSettingsPage)), menu),
+              isTrue);
+        }
         expect(
             find.descendant(
                 of: find.byType(WindowSettingsPage),
@@ -367,26 +429,61 @@ void main() {
                 .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
                 .groupValue,
             'minimize');
+
+        await ensureSettings();
         await _select(tester, 'Playback & appearance');
         expect(find.byType(PersonalizationPage), findsOneWidget);
-        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        if (mobile) {
+          expect(find.byType(ListeningSettingsPage), findsNothing);
+        } else {
+          expect(
+              tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        }
+
+        await ensureSettings();
         await _select(tester, 'Favorites');
         expect(find.byType(FavoritesPage), findsOneWidget);
-        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        if (mobile) {
+          expect(find.byType(ListeningSettingsPage), findsNothing);
+        } else {
+          expect(
+              tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        }
+
+        await ensureSettings();
         await _select(tester, 'Window behavior');
         expect(
             tester
                 .widget<RadioGroup<String>>(find.byType(RadioGroup<String>))
                 .groupValue,
             'minimize');
-        await _select(tester, 'Downloads');
+
+        if (mobile) {
+          // 窄屏「下载」在底部标签栏，不在设置页里；此时设置已收起。
+          await tester.tap(find.byTooltip('Downloads'));
+          await tester.pumpAndSettle();
+        } else {
+          await ensureSettings();
+          await _select(tester, 'Downloads');
+        }
         expect(find.byType(DownloadsPage), findsOneWidget);
-        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        if (mobile) {
+          expect(find.byType(ListeningSettingsPage), findsNothing);
+        } else {
+          expect(
+              tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+        }
+
         await tester.tap(find.byTooltip('Back'));
         await tester.pumpAndSettle();
         expect(find.byType(BookshelfPage), findsOneWidget);
-        expect(tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
-        expect(find.byTooltip('Close settings'), findsOneWidget);
+        if (mobile) {
+          expect(find.byType(ListeningSettingsPage), findsNothing);
+        } else {
+          expect(
+              tester.getRect(find.byType(ListeningSettingsPage)), menuBounds);
+          expect(find.byTooltip('Close settings'), findsOneWidget);
+        }
         expect(tester.takeException(), isNull);
       } finally {
         debugDefaultTargetPlatformOverride = null;
@@ -399,6 +496,26 @@ void main() {
       await _pump(tester, Size(width, 1000));
       final page = tester.element(find.byType(BookshelfPage));
       final before = tester.getRect(find.byType(BookshelfPage));
+      if (width < 840) {
+        // 窄屏没有图标侧栏：底部标签栏同时显示图标与文字，
+        // 点设置直接切到整页设置，返回后书架实例与位置都不变。
+        expect(find.text('Bookshelf'), findsOneWidget);
+        expect(find.text('Downloads'), findsOneWidget);
+        expect(find.text('Settings'), findsOneWidget);
+        final barY = tester.getTopLeft(find.byTooltip('Settings')).dy;
+        expect(barY, greaterThan(before.height / 2));
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Playback & appearance'), findsOneWidget);
+        expect(find.byType(BookshelfPage), findsNothing);
+        await tester.tap(find.byTooltip('Bookshelf'));
+        await tester.pumpAndSettle();
+        expect(identical(tester.element(find.byType(BookshelfPage)), page),
+            isTrue);
+        expect(tester.getRect(find.byType(BookshelfPage)), before);
+        expect(tester.takeException(), isNull);
+        return;
+      }
       expect(tester.getTopLeft(find.byTooltip('Home')).dx, lessThan(24));
       expect(tester.getTopLeft(find.byTooltip('Settings')).dx,
           greaterThan(tester.getTopLeft(find.byTooltip('Home')).dx));
@@ -407,7 +524,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 130));
       final halfway = tester.getRect(find.byType(BookshelfPage));
       expect(halfway.left, greaterThan(before.left));
-      expect(halfway.left, lessThan(before.left + (width >= 840 ? 280 : 72)));
+      expect(halfway.left, lessThan(before.left + 280));
       await tester.pumpAndSettle();
       expect(find.byTooltip('Playback & appearance'), findsOneWidget);
       await tester.tap(find.byTooltip('Close settings'));
@@ -521,36 +638,31 @@ void main() {
   });
 
   for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
-    testWidgets('$platform 设置支持右滑打开左滑隐藏，主页键清除子页并保留书架', (tester) async {
+    testWidgets('$platform 底部标签栏打开设置，返回主页保留书架与子页状态', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
       try {
         final (app, _) = await _pump(tester, const Size(390, 844));
         final shelf = tester.state(find.byType(BookshelfPage));
-        await tester.dragFrom(const Offset(150, 24), const Offset(140, 0));
+        await tester.tap(find.byTooltip('Settings'));
         await tester.pumpAndSettle();
         expect(find.byTooltip('Close settings').hitTestable(), findsOneWidget);
         await _select(tester, 'Playback & appearance');
-        final settings = tester.state(find.byType(PersonalizationPage));
-        await tester.dragFrom(const Offset(220, 24), const Offset(-140, 0));
+        // 底部标签栏切到书架，再切回设置时保留已加载的子页状态。
+        await tester.tap(find.byTooltip('Bookshelf').hitTestable());
         await tester.pumpAndSettle();
-        expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
-        expect(
-            identical(tester.state(find.byType(PersonalizationPage)), settings),
-            isTrue);
-        await tester.dragFrom(const Offset(150, 24), const Offset(140, 0));
-        await tester.pumpAndSettle();
-        expect(find.byTooltip('Close settings').hitTestable(), findsOneWidget);
-        await _select(tester, 'Favorites');
-        final requests = List<String>.of(app.client.requests);
-        await tester.tap(find.byTooltip('Home').hitTestable());
-        await tester.pumpAndSettle();
-        expect(find.byType(FavoritesPage), findsNothing);
         expect(
             identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
-        expect(find.byTooltip('Settings').hitTestable(), findsOneWidget);
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pumpAndSettle();
+        expect(find.byTooltip('Playback & appearance'), findsOneWidget);
+        expect(find.byType(ListeningSettingsPage), findsOneWidget);
+        final requests = List<String>.of(app.client.requests);
+        await tester.tap(find.byTooltip('Bookshelf').hitTestable());
+        await tester.pumpAndSettle();
+        expect(find.byType(PersonalizationPage), findsNothing);
+        expect(
+            identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
         expect(app.client.requests, requests);
-        expect(tester.getTopLeft(find.byTooltip('Home').hitTestable()).dx,
-            lessThan(24));
         expect(tester.takeException(), isNull);
       } finally {
         debugDefaultTargetPlatformOverride = null;
@@ -595,13 +707,19 @@ void main() {
     await tester.pumpAndSettle();
     expect(app.bookDetailsCache.revision, revision + 1);
     expect(find.byType(SnackBar), findsNothing);
-    await _select(tester, 'Bookshelf');
+    // 窄屏：从底部标签栏回到书架。
+    if (find.byType(ListeningSettingsPage).evaluate().isEmpty) {
+      await tester.tap(find.byTooltip('Bookshelf'));
+      await tester.pumpAndSettle();
+    } else {
+      await _select(tester, 'Bookshelf');
+    }
     expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isFalse);
     expect(tester.takeException(), isNull);
   });
 
   for (final platform in [TargetPlatform.iOS, TargetPlatform.android]) {
-    testWidgets('$platform 展开播放详情后可左滑收起菜单，进度条仍可拖动', (tester) async {
+    testWidgets('$platform 展开播放详情后可操作进度与播放键，切回标签栏保留页面', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);
       final (_, player) = await _pump(tester, const Size(390, 844));
@@ -613,8 +731,6 @@ void main() {
         'duration': 600,
       });
       player.notifyListeners();
-      await tester.pumpAndSettle();
-      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       await tester.tap(find
           .descendant(
@@ -631,18 +747,12 @@ void main() {
       await tester.drag(slider, const Offset(80, 0));
       await tester.pumpAndSettle();
       expect(player.position, greaterThan(20));
-      expect(find.byTooltip('Close settings').hitTestable(), findsOneWidget);
-      await tester.dragFrom(const Offset(260, 130), const Offset(-160, 0));
-      await tester.pumpAndSettle();
-      expect(find.byTooltip('Close settings').hitTestable(), findsNothing);
-      expect(player.isExpanded, isTrue);
+      // 展开播放时底部标签栏让位，不会压在控制区上。
+      expect(find.text('Bookshelf'), findsNothing);
       expect(
           identical(
               tester.element(find.byType(ExpandedPlayerOverlay)), overlay),
           isTrue);
-      await tester.dragFrom(const Offset(100, 130), const Offset(160, 0));
-      await tester.pumpAndSettle();
-      expect(find.byTooltip('Close settings').hitTestable(), findsNothing);
       final play = find.byIcon(Icons.play_arrow_rounded);
       await tester.ensureVisible(play);
       await tester.pumpAndSettle();
@@ -661,9 +771,14 @@ void main() {
       final revision = app.bookDetailsCache.revision;
       await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
+      final mobile = size.width < 840;
       final settingsRequests =
           app.client.requests.where((path) => path == '/api/settings').length;
       for (var i = 0; i < 2; i++) {
+        if (mobile && find.byType(ListeningSettingsPage).evaluate().isEmpty) {
+          await tester.tap(find.byTooltip('Settings'));
+          await tester.pumpAndSettle();
+        }
         await _select(tester, 'About Ting Reader');
         expect(find.byType(AboutPage), findsOneWidget);
         expect(app.bookDetailsCache.revision, revision);
@@ -671,7 +786,12 @@ void main() {
             app.client.requests.where((path) => path == '/api/settings').length,
             settingsRequests);
         expect(find.byType(SnackBar), findsNothing);
-        await _select(tester, 'Bookshelf');
+        if (mobile) {
+          await tester.tap(find.byTooltip('Bookshelf'));
+          await tester.pumpAndSettle();
+        } else {
+          await _select(tester, 'Bookshelf');
+        }
         expect(
             identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
         expect(tester.takeException(), isNull);
@@ -684,10 +804,18 @@ void main() {
         'tab switches preserve pages without repeating requests at $size',
         (tester) async {
       final (app, player) = await _pump(tester, size);
+      final mobile = size.width < 840;
       final shelf = tester.state(find.byType(BookshelfPage));
       final requests = List<String>.of(app.client.requests);
-      expect(find.text('Settings'), findsNothing);
-      expect(find.text('Downloads'), findsNothing);
+      if (mobile) {
+        // 窄屏底部标签栏同时显示图标与文字。
+        expect(find.text('Bookshelf'), findsOneWidget);
+        expect(find.text('Downloads'), findsOneWidget);
+        expect(find.text('Settings'), findsOneWidget);
+      } else {
+        expect(find.text('Settings'), findsNothing);
+        expect(find.text('Downloads'), findsNothing);
+      }
       expect(find.byType(DownloadsPage, skipOffstage: false), findsNothing);
 
       await tester.tap(find.byTooltip('Settings'));
@@ -696,15 +824,39 @@ void main() {
       expect(find.byType(DownloadsPage, skipOffstage: false), findsNothing);
       player.notifyListeners();
       await tester.pump();
-      await _select(tester, 'Bookshelf');
+
+      if (mobile) {
+        await tester.tap(find.byTooltip('Bookshelf'));
+        await tester.pumpAndSettle();
+      } else {
+        await _select(tester, 'Bookshelf');
+      }
       expect(
           identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
       expect(app.client.requests, requests);
 
-      await _select(tester, 'Downloads');
+      Future<void> openDownloads() async {
+        if (mobile) {
+          await tester.tap(find.byTooltip('Downloads'));
+          await tester.pumpAndSettle();
+        } else {
+          await _select(tester, 'Downloads');
+        }
+      }
+
+      Future<void> openBookshelf() async {
+        if (mobile) {
+          await tester.tap(find.byTooltip('Bookshelf'));
+          await tester.pumpAndSettle();
+        } else {
+          await _select(tester, 'Bookshelf');
+        }
+      }
+
+      await openDownloads();
       final downloads = tester.state(find.byType(DownloadsPage));
-      await _select(tester, 'Bookshelf');
-      await _select(tester, 'Downloads');
+      await openBookshelf();
+      await openDownloads();
       expect(identical(tester.state(find.byType(DownloadsPage)), downloads),
           isTrue);
       expect(app.client.requests, requests);

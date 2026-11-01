@@ -21,7 +21,9 @@ import 'mine/personalization/personalization_page.dart';
 import 'playlists/playlists_page.dart';
 import '../core/models/models.dart';
 import '../core/services/desktop_window.dart';
+import '../core/state/app_state.dart';
 import '../core/state/navigation_state.dart';
+import '../core/state/player_state.dart';
 import '../core/plugin_extensions/types.dart';
 import '../core/utils/locale.dart';
 import '../shared/app_scope.dart';
@@ -29,6 +31,7 @@ import '../shared/common/common_widgets.dart';
 import '../shared/plugin_extensions/plugin_extension_host.dart';
 import 'player/mini_player.dart';
 import 'settings_push_layout.dart';
+import 'shell_bottom_bar.dart';
 
 typedef _NavigationEntry = ({
   AppDestination destination,
@@ -320,6 +323,20 @@ class _AppShellState extends State<AppShell> {
                   final showMiniPlayer = player.hasChapter &&
                       !player.isExpanded &&
                       !hidesMiniPlayer(navDestination);
+                  // 窄屏不再使用 72px 宽的纯图标侧栏：那一列在手机上放不下文字，
+                  // 用户只能看到齿轮图标。改为底部标签栏，图标与文字始终同时可见，
+                  // 设置作为整页打开。
+                  final compactShell = constraints.maxWidth < 840;
+                  if (compactShell) {
+                    return _buildCompactShell(
+                      context: context,
+                      player: player,
+                      bottomInset: bottomInset,
+                      collapsedMini: collapsedMini,
+                      showMiniPlayer: showMiniPlayer,
+                      navDestination: navDestination,
+                    );
+                  }
                   final pluginExtensionBottom =
                       showMiniPlayer ? 110.0 + bottomInset : 24.0 + bottomInset;
                   return SettingsPushLayout(
@@ -408,6 +425,134 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  /// 窄屏外壳：内容区加底部标签栏，设置整页打开。
+  Widget _buildCompactShell({
+    required BuildContext context,
+    required PlayerState player,
+    required double bottomInset,
+    required bool collapsedMini,
+    required bool showMiniPlayer,
+    required AppDestination navDestination,
+  }) {
+    final appState = AppScope.appOf(context);
+    final settingsOpen = _settingsOpen;
+    final showBar = !player.isExpanded;
+    final barHeight = showBar ? 58.0 + bottomInset : 0.0;
+    final miniBottom = barHeight + (collapsedMini ? 20 : 12);
+    return Scaffold(
+      body: Stack(
+        children: [
+          SafeArea(
+            bottom: false,
+            child: Column(
+              children: [
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      // 设置打开时把内容页保留在树里（Offstage），
+                      // 关闭后书架、详情与滚动位置都不重来。
+                      Visibility(
+                        visible: !settingsOpen,
+                        maintainState: true,
+                        child: Column(
+                          children: [
+                            if (_compactBackButton(appState) case final back?)
+                              back,
+                            Expanded(child: _page()),
+                          ],
+                        ),
+                      ),
+                      if (settingsOpen) _settingsPanel(showNavigation: false),
+                    ],
+                  ),
+                ),
+                // 给底部标签栏留出空间，内容不会被压住。
+                SizedBox(height: barHeight),
+              ],
+            ),
+          ),
+          if (showMiniPlayer)
+            Positioned(
+              left: collapsedMini ? 24 : 12,
+              right: collapsedMini ? null : 12,
+              bottom: miniBottom,
+              child: const Material(
+                type: MaterialType.transparency,
+                child: MiniPlayer(),
+              ),
+            ),
+          if (!player.isExpanded)
+            Positioned.fill(
+              child: PluginExtensionHost(
+                bottomOffset:
+                    showMiniPlayer ? barHeight + 110.0 : barHeight + 24.0,
+                enabled: appState.pluginToolMenuEnabled &&
+                    _destination == AppDestination.plugins,
+              ),
+            ),
+          if (player.isExpanded)
+            const Positioned.fill(child: ExpandedPlayerOverlay()),
+          if (showBar)
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: ShellBottomBar(
+                current: navDestination,
+                settingsOpen: settingsOpen,
+                offline: appState.offlineMode,
+                onSelect: (destination) {
+                  if (destination == AppDestination.mine) {
+                    _openSettings();
+                  } else if (settingsOpen) {
+                    _closeSettings();
+                    _go(destination);
+                  } else {
+                    _go(destination);
+                  }
+                },
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 整页设置里选择条目：先收起设置，再进入目标页。
+  void _goFromFullPageSettings(AppDestination destination) {
+    if (destination == AppDestination.mine ||
+        destination == AppDestination.bookshelf ||
+        destination == AppDestination.downloads) {
+      _closeSettings();
+      _go(destination);
+      return;
+    }
+    setState(() => _settingsOpen = false);
+    _go(destination);
+  }
+
+  Widget? _compactBackButton(AppState appState) {
+    if (appState.offlineMode ||
+        _navigation.hasDetail ||
+        !_primaryDestinations.contains(_destination) ||
+        _destination == AppDestination.bookshelf) {
+      return null;
+    }
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(4, 4, 0, 0),
+        child: IconButton(
+          tooltip: context.localeText('返回', 'Back'),
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () =>
+              _go(_navigation.backDestination ?? AppDestination.bookshelf),
+        ),
+      ),
+    );
+  }
+
   Widget _page() {
     final app = AppScope.appOf(context);
     final identity =
@@ -446,7 +591,7 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _settingsPanel() {
+  Widget _settingsPanel({bool showNavigation = true}) {
     return LayoutBuilder(builder: (context, constraints) {
       final compact = constraints.maxWidth < 200;
       final app = AppScope.appOf(context);
@@ -518,8 +663,11 @@ class _AppShellState extends State<AppShell> {
                   embedded: true,
                   compact: compact,
                   currentDestination: _navigation.navDestination,
-                  navigation: navigation,
-                  go: _go,
+                  // 窄屏外壳已经有底部标签栏，设置页里不再重复一份导航。
+                  navigation: showNavigation ? navigation : null,
+                  // 整页打开时，选中条目后先收起设置再进入目标页；
+                  // 侧栏推入时保持设置可见，右侧切换内容。
+                  go: showNavigation ? _go : _goFromFullPageSettings,
                   onOpenPluginPage: _openPluginPage,
                   pluginPages: _sidebarPluginPages,
                   activePluginPageId: _activePluginPage?.id,
