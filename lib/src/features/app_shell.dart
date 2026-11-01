@@ -463,7 +463,15 @@ class _AppShellState extends State<AppShell> {
                           ],
                         ),
                       ),
-                      if (settingsOpen) _settingsPanel(showNavigation: false),
+                      if (settingsOpen)
+                        _settingsPanel(
+                          showNavigation: false,
+                          // 迷你播放条浮在内容上方，给设置列表留出等高的
+                          // 底部空白，滚到底时最后几项不会被压住。
+                          bottomPadding: showMiniPlayer
+                              ? (collapsedMini ? 88.0 : 80.0)
+                              : 0.0,
+                        ),
                     ],
                   ),
                 ),
@@ -472,6 +480,16 @@ class _AppShellState extends State<AppShell> {
               ],
             ),
           ),
+          // 左缘右滑返回：只占最左侧 22px，避免和横向滚动、进度条拖动冲突。
+          // 放在迷你播放条之前，播放条仍优先响应点击。
+          if (!player.isExpanded)
+            Positioned(
+              left: 0,
+              top: 0,
+              bottom: barHeight,
+              width: 22,
+              child: _EdgeBackGesture(onTrigger: _handleSystemBack),
+            ),
           if (showMiniPlayer)
             Positioned(
               left: collapsedMini ? 24 : 12,
@@ -591,7 +609,8 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Widget _settingsPanel({bool showNavigation = true}) {
+  Widget _settingsPanel(
+      {bool showNavigation = true, double bottomPadding = 0}) {
     return LayoutBuilder(builder: (context, constraints) {
       final compact = constraints.maxWidth < 200;
       final app = AppScope.appOf(context);
@@ -671,6 +690,7 @@ class _AppShellState extends State<AppShell> {
                   onOpenPluginPage: _openPluginPage,
                   pluginPages: _sidebarPluginPages,
                   activePluginPageId: _activePluginPage?.id,
+                  bottomPadding: bottomPadding,
                 ),
               ),
             ]),
@@ -834,6 +854,54 @@ class _AppShellState extends State<AppShell> {
           },
         );
     }
+  }
+}
+
+/// 屏幕左缘的右滑返回手势。
+///
+/// 只在最左侧一条窄区域内响应，避免与横向列表、进度条拖动冲突；
+/// 触摸到内容区后交给下层处理，不会吞掉点击。
+class _EdgeBackGesture extends StatefulWidget {
+  const _EdgeBackGesture({required this.onTrigger});
+
+  final bool Function() onTrigger;
+
+  @override
+  State<_EdgeBackGesture> createState() => _EdgeBackGestureState();
+}
+
+class _EdgeBackGestureState extends State<_EdgeBackGesture> {
+  double _drag = 0;
+  bool _armed = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      behavior: HitTestBehavior.translucent,
+      // 手势识别器要等指针移动超过触摸阈值才算开始，那时手指已经离开屏幕
+      // 左缘，所以起点必须在按下的那一刻记录，不能用 dragStart 的位置。
+      onHorizontalDragDown: (details) {
+        _drag = 0;
+        _armed = details.localPosition.dx <= 22;
+      },
+      onHorizontalDragStart: (_) => _drag = 0,
+      onHorizontalDragUpdate: (details) {
+        if (!_armed) return;
+        _drag += details.primaryDelta ?? 0;
+      },
+      onHorizontalDragEnd: (details) {
+        if (_armed && (_drag > 48 || (details.primaryVelocity ?? 0) > 320)) {
+          widget.onTrigger();
+        }
+        _drag = 0;
+        _armed = false;
+      },
+      onHorizontalDragCancel: () {
+        _drag = 0;
+        _armed = false;
+      },
+      child: const SizedBox.expand(),
+    );
   }
 }
 

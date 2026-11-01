@@ -17,6 +17,7 @@ import 'package:ting_reader_flutter/src/core/state/app_state.dart';
 import 'package:ting_reader_flutter/src/core/state/download_state.dart';
 import 'package:ting_reader_flutter/src/core/state/player_state.dart';
 import 'package:ting_reader_flutter/src/features/app_shell.dart';
+import 'package:ting_reader_flutter/src/features/shell_bottom_bar.dart';
 import 'package:ting_reader_flutter/src/features/bookshelf/bookshelf_page.dart';
 import 'package:ting_reader_flutter/src/features/bookshelf/book_detail/book_detail_page.dart';
 import 'package:ting_reader_flutter/src/features/mine/downloads_page.dart';
@@ -863,6 +864,54 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  testWidgets('底部标签栏打开设置后高亮设置，左缘右滑可返回', (tester) async {
+    await _pump(tester, const Size(390, 844));
+    final shelf = tester.state(find.byType(BookshelfPage));
+
+    bool tabSelected(String label) {
+      final widget = tester.widget<Semantics>(find.descendant(
+        of: find.byType(ShellBottomBar),
+        matching: find.byWidgetPredicate(
+            (w) => w is Semantics && w.properties.label == label),
+      ));
+      return widget.properties.selected ?? false;
+    }
+
+    expect(tabSelected('Bookshelf'), isTrue);
+    expect(tabSelected('Settings'), isFalse);
+
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expect(find.byType(ListeningSettingsPage), findsOneWidget);
+    // 设置整页打开后高亮移到设置项，书架不再保持选中。
+    expect(tabSelected('Settings'), isTrue);
+    expect(tabSelected('Bookshelf'), isFalse);
+
+    // 左缘右滑关闭设置，回到书架且实例与位置不变。
+    await tester.dragFrom(const Offset(6, 400), const Offset(160, 0));
+    await tester.pumpAndSettle();
+    expect(find.byType(ListeningSettingsPage), findsNothing);
+    expect(identical(tester.state(find.byType(BookshelfPage)), shelf), isTrue);
+    expect(tabSelected('Bookshelf'), isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('设置子页左缘右滑返回设置列表', (tester) async {
+    await _pump(tester, const Size(390, 844));
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await _select(tester, 'Playback & appearance');
+    expect(find.byType(PersonalizationPage), findsOneWidget);
+    expect(find.byType(ListeningSettingsPage), findsNothing);
+
+    await tester.dragFrom(const Offset(6, 400), const Offset(160, 0));
+    await tester.pumpAndSettle();
+    expect(find.byType(PersonalizationPage), findsNothing);
+    expect(find.byType(ListeningSettingsPage), findsOneWidget);
+    expect(find.byTooltip('Playback & appearance'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets('changing servers discards retained server data', (tester) async {
     final (app, _) = await _pump(tester, const Size(390, 844));

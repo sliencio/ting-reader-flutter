@@ -74,10 +74,13 @@ class ShellBottomBar extends StatelessWidget {
   /// 避免打开设置后底部高亮跳回书架。
   bool _matches(AppDestination destination) {
     if (destination == AppDestination.mine) {
-      return current == AppDestination.mine ||
+      return settingsOpen ||
+          current == AppDestination.mine ||
           current == AppDestination.personalization ||
           current == AppDestination.account;
     }
+    // 设置整页打开时，书架/下载页仍在树里但被遮住，不能继续高亮。
+    if (settingsOpen) return false;
     return current == destination;
   }
 }
@@ -111,47 +114,52 @@ class _TabButton extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
     final color = selected ? accent : context.mutedText;
-    return Tooltip(
-      message: tab.label,
-      child: InkWell(
-        onTap: onTap,
-        splashColor: Colors.transparent,
-        highlightColor: Colors.transparent,
-        child: SizedBox(
-          height: 58,
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOutCubic,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
-                decoration: BoxDecoration(
-                  color: selected
-                      ? accent.withValues(alpha: context.isDark ? 0.22 : 0.12)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(99),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: tab.label,
+      child: Tooltip(
+        message: tab.label,
+        child: InkWell(
+          onTap: onTap,
+          splashColor: Colors.transparent,
+          highlightColor: Colors.transparent,
+          child: SizedBox(
+            height: 58,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  curve: Curves.easeOutCubic,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: selected
+                        ? accent.withValues(alpha: context.isDark ? 0.22 : 0.12)
+                        : Colors.transparent,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                  child: Icon(
+                    selected ? tab.activeIcon : tab.icon,
+                    size: 22,
+                    color: color,
+                  ),
                 ),
-                child: Icon(
-                  selected ? tab.activeIcon : tab.icon,
-                  size: 22,
-                  color: color,
+                const SizedBox(height: 2),
+                Text(
+                  tab.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    height: 1.1,
+                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    color: color,
+                  ),
                 ),
-              ),
-              const SizedBox(height: 2),
-              Text(
-                tab.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 11,
-                  height: 1.1,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
-                  color: color,
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),

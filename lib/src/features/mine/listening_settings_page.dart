@@ -27,6 +27,7 @@ class ListeningSettingsPage extends StatefulWidget {
     this.navigation,
     this.compact = false,
     this.currentDestination,
+    this.bottomPadding = 0,
   });
 
   final ValueChanged<AppDestination> go;
@@ -37,6 +38,9 @@ class ListeningSettingsPage extends StatefulWidget {
   final Widget? navigation;
   final bool compact;
   final AppDestination? currentDestination;
+
+  /// 额外底部留白，避免浮动的迷你播放条压住列表最后几项。
+  final double bottomPadding;
 
   @override
   State<ListeningSettingsPage> createState() => _ListeningSettingsPageState();
@@ -181,7 +185,9 @@ class _ListeningSettingsPageState extends State<ListeningSettingsPage> {
     }
 
     return ListView(
-      padding: EdgeInsets.all(widget.compact ? 8 : 16),
+      padding:
+          (widget.compact ? const EdgeInsets.all(8) : const EdgeInsets.all(16))
+              .add(EdgeInsets.only(bottom: widget.bottomPadding)),
       children: [
         if (!widget.embedded)
           Text(context.localeText('设置', 'Settings'),
