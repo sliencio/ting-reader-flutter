@@ -19,6 +19,7 @@ static BOOL _controlsUpdated = NO;
 static enum AudioProcessingState processingState = ApsIdle;
 static BOOL playing = NO;
 static MPRemoteCommandEvent *lastToggleEvent = nil;
+static MPRemoteCommandEvent *lastPlaybackEvent = nil;
 static NSNumber *position = nil;
 static NSNumber *bufferedPosition = nil;
 static NSNumber *updateTime = nil;
@@ -271,20 +272,34 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
         remoteCommandLog = [NSMutableArray new];
     }
     NSNumber *rate = nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate];
+    // 命令中心是进程级单例，静态变量会在 stopService 时被置空，
+    // 直接读共享实例才能反映真实启用状态。
+    MPRemoteCommandCenter *center = [MPRemoteCommandCenter sharedCommandCenter];
     [remoteCommandLog addObject:@{
         @"command": command,
         @"playing": @(playing),
         @"rate": rate != nil ? rate : [NSNull null],
-        @"pauseEnabled": @(commandCenter ? commandCenter.pauseCommand.isEnabled : NO),
-        @"playEnabled": @(commandCenter ? commandCenter.playCommand.isEnabled : NO),
-        @"toggleEnabled": @(commandCenter ? commandCenter.togglePlayPauseCommand.isEnabled : NO),
-        @"nextEnabled": @(commandCenter ? commandCenter.nextTrackCommand.isEnabled : NO),
+        @"pauseEnabled": @(center.pauseCommand.isEnabled),
+        @"playEnabled": @(center.playCommand.isEnabled),
+        @"toggleEnabled": @(center.togglePlayPauseCommand.isEnabled),
+        @"nextEnabled": @(center.nextTrackCommand.isEnabled),
         @"active": @([MPNowPlayingInfoCenter defaultCenter].nowPlayingInfo != nil),
         @"at": @((long long)([[NSDate date] timeIntervalSince1970] * 1000.0)),
     }];
     while (remoteCommandLog.count > kRemoteCommandLogLimit) {
         [remoteCommandLog removeObjectAtIndex:0];
     }
+}
+
+/// 同一次按键可能同时命中 play、pause 与切换回调，
+/// 只允许最先到达的那条生效，避免一次双击被来回切换两遍。
+- (BOOL)acceptPlaybackEvent:(MPRemoteCommandEvent *)event {
+    if (lastPlaybackEvent != nil &&
+        (event == lastPlaybackEvent || event.timestamp == lastPlaybackEvent.timestamp)) {
+        return NO;
+    }
+    lastPlaybackEvent = event;
+    return YES;
 }
 
 - (MPRemoteCommandHandlerStatus) play: (MPRemoteCommandEvent *) event {
@@ -505,11 +520,9 @@ static const NSUInteger kRemoteCommandLogLimit = 40;
 
 - (MPRemoteCommandHandlerStatus) togglePlayPause: (MPRemoteCommandEvent *) event {
     NSLog(@"[TingRemote] command=togglePlayPause playing=%d actions=%ld", playing, actionBits);
-    // 同一系统事件不能重复切换，避免暂停后又被第二次回调恢复播放。
-    if (lastToggleEvent && (event == lastToggleEvent || event.timestamp == lastToggleEvent.timestamp)) {
+    if (![self acceptPlaybackEvent:event]) {
         return MPRemoteCommandHandlerStatusSuccess;
     }
-    lastToggleEvent = event;
     // 以 Now Playing 上报的播放速率为准，静态 playing 缓存可能滞后于真实状态，
     // 会让播放中的双击被当成重复的“播放”而无效。
     NSNumber *rate = nowPlayingInfo[MPNowPlayingInfoPropertyPlaybackRate];
