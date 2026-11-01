@@ -30,6 +30,9 @@ class ChapterReadSync extends ChangeNotifier {
   String _key(String owner) =>
       'chapter_read_sync:${base64Url.encode(utf8.encode(owner))}';
 
+  String _confirmedKey(String owner) =>
+      'chapter_read_confirmed:${base64Url.encode(utf8.encode(owner))}';
+
   Set<String> pendingFor(String book) => _owner == identity()
       ? Set.unmodifiable(_pending[book] ?? const <String>{})
       : {};
@@ -37,10 +40,12 @@ class ChapterReadSync extends ChangeNotifier {
       ? Set.unmodifiable(_confirmed[book] ?? const <String>{})
       : {};
 
-  void acceptSnapshot(String book, Iterable<String> visibleIds) {
-    // 成功回执只用于刷新前的即时显示，重新读取时以服务端章节为准。
-    if (_owner == identity()) _confirmed[book]?.removeAll(visibleIds);
-  }
+  /// 章节列表刷新后调用。
+  ///
+  /// 已同步成功的记录必须保留：服务端可能没有把 is_read 回填到章节列表
+  /// （旧版本服务端、或列表接口不返回该字段），此前在这里清空本地记录，
+  /// 会让用户重装或重启后看到已读标记凭空消失。
+  void acceptSnapshot(String book, Iterable<String> visibleIds) {}
 
   Future<void> _serial(Future<void> Function() action) {
     final next = _tail.then((_) => action());
@@ -53,14 +58,23 @@ class ChapterReadSync extends ChangeNotifier {
   Future<void> _load(String owner) async {
     if (_owner == owner) return;
     final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(_key(owner));
-    final data = raw == null
-        ? <String, dynamic>{}
-        : jsonDecode(raw) as Map<String, dynamic>;
     _pending.clear();
     _confirmed.clear();
-    for (final entry in data.entries) {
-      _pending[entry.key] = (entry.value as List).cast<String>().toSet();
+    final rawPending = prefs.getString(_key(owner));
+    if (rawPending != null) {
+      for (final entry
+          in (jsonDecode(rawPending) as Map<String, dynamic>).entries) {
+        _pending[entry.key] = (entry.value as List).cast<String>().toSet();
+      }
+    }
+    // 已同步成功的记录同样落盘：章节列表接口不一定回填 is_read，
+    // 只靠内存保存会让重装或重启后的已读标记凭空消失。
+    final rawConfirmed = prefs.getString(_confirmedKey(owner));
+    if (rawConfirmed != null) {
+      for (final entry
+          in (jsonDecode(rawConfirmed) as Map<String, dynamic>).entries) {
+        _confirmed[entry.key] = (entry.value as List).cast<String>().toSet();
+      }
     }
     _owner = owner;
     error = null;
@@ -68,13 +82,21 @@ class ChapterReadSync extends ChangeNotifier {
 
   Future<void> _save(String owner) async {
     final prefs = await SharedPreferences.getInstance();
-    final saved = await prefs.setString(
+    final pendingSaved = await prefs.setString(
         _key(owner),
         jsonEncode({
           for (final entry in _pending.entries)
             if (entry.value.isNotEmpty) entry.key: entry.value.toList()..sort(),
         }));
-    if (!saved) throw StateError('保存章节待同步记录失败');
+    final confirmedSaved = await prefs.setString(
+        _confirmedKey(owner),
+        jsonEncode({
+          for (final entry in _confirmed.entries)
+            if (entry.value.isNotEmpty) entry.key: entry.value.toList()..sort(),
+        }));
+    if (!pendingSaved || !confirmedSaved) {
+      throw StateError('保存章节已读记录失败');
+    }
   }
 
   Future<void> migrate(String book) {

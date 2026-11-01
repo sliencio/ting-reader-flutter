@@ -262,9 +262,16 @@ class _BookDetailPageState extends State<BookDetailPage> {
     final detail = _detail;
     final book = _book;
     if (book == null || chapter.bookId != book.id) return;
+    // 章节列表首次进入要发网络请求，先用预选状态让播放条立刻显示目标章节
+    // 和加载指示，避免点完毫无反应。
+    final player = AppScope.playerOf(context);
+    player.previewChapterSelection(book, chapter);
     final allChapters = await _fetchAllChapters();
-    if (!mounted || !identical(detail, _detail)) return;
-    await AppScope.playerOf(context).playChapter(
+    if (!mounted || !identical(detail, _detail)) {
+      player.cancelChapterSelection(chapter.id);
+      return;
+    }
+    await player.playChapter(
       book,
       allChapters,
       chapter,

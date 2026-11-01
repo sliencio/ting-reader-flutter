@@ -413,6 +413,31 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     await _playChapter(book, chapterList, chapter, startAt: startAt);
   }
 
+  /// 选中章节后立刻挂上目标章节并进入加载态，不等章节列表请求返回。
+  ///
+  /// 详情页点选章节时还要先拿到完整章节列表（首次进入是网络请求），
+  /// 这期间界面原本毫无变化，用户会以为没有点中。这里先把书名、章节和
+  /// 加载状态推给界面，真正的播放仍由 [playChapter] 完成。
+  void previewChapterSelection(Book book, Chapter chapter) {
+    if (_disposed) return;
+    currentBook = book;
+    currentChapter = chapter;
+    duration = chapter.duration.toDouble();
+    currentTime = 0;
+    error = null;
+    isMiniCollapsed = false;
+    _connectingPlayback = true;
+    _notifyIfActive();
+  }
+
+  /// 取消预选并退出加载态，避免章节列表请求失败后播放条一直转圈。
+  void cancelChapterSelection(String chapterId) {
+    if (_disposed || currentChapter?.id != chapterId) return;
+    if (isPlaying || !_connectingPlayback) return;
+    _connectingPlayback = false;
+    _notifyIfActive();
+  }
+
   Future<void> togglePlay() => _togglePlayback();
   Future<void> pause() => _pausePlayback();
   Future<void> seek(double seconds) async {

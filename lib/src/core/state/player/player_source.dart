@@ -2,13 +2,16 @@ part of '../player_state.dart';
 
 /// Audio source construction, local downloads and notification metadata.
 extension _PlayerSources on PlayerState {
-  bool _canReuseAudioQueue(Book book, List<Chapter> nextChapters) {
+  /// [previousBook] 是本次切换前的书。预选会提前把 `currentBook` 指向新书，
+  /// 因此不能用 `currentBook` 判断是否换书，否则会错误复用上一本的音频队列。
+  bool _canReuseAudioQueue(
+      Book? previousBook, Book book, List<Chapter> nextChapters) {
     if (!_usingAudioQueue ||
         _usingTranscodeStream ||
         error != null ||
         _audio.processingState == audio.ProcessingState.completed ||
         _audio.processingState == audio.ProcessingState.idle ||
-        !identical(currentBook, book) ||
+        !identical(previousBook, book) ||
         _mediaAuthRevision != appState.api.authRevision ||
         chapters.length != nextChapters.length) {
       return false;

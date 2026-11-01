@@ -66,10 +66,32 @@ void main() {
     expect(api.batches.single, ['one', 'two']);
     expect(sync.pendingFor('book'), isEmpty);
     expect(sync.confirmedFor('book'), {'one', 'two'});
+    // 章节列表刷新不再清空已同步记录：服务端可能不回填 is_read，
+    // 清空会让已读标记凭空消失。
     sync.acceptSnapshot('book', ['one']);
-    expect(sync.confirmedFor('book'), {'two'});
+    expect(sync.confirmedFor('book'), {'one', 'two'});
     await sync.flush();
     expect(api.batches.length, 1);
+  });
+
+  test('已同步的已读记录重启后仍然保留', () async {
+    var owner = 'server:user';
+    final api = _Api();
+    final first =
+        ChapterReadSync(api: api, identity: () => owner, canSync: () => true);
+    await first.mark('book', ['one', 'two']);
+    await first.flush();
+    expect(first.confirmedFor('book'), {'one', 'two'});
+    first.dispose();
+
+    final sync =
+        ChapterReadSync(api: api, identity: () => owner, canSync: () => true);
+    addTearDown(sync.dispose);
+    await sync.flush();
+    expect(sync.confirmedFor('book'), {'one', 'two'});
+    expect(sync.pendingFor('book'), isEmpty);
+    expect(api.batches.length, 1);
+    owner = 'server:user';
   });
 
   test('旧本机已读迁移、分批部分失败以及失败后的补传', () async {

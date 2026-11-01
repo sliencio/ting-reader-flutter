@@ -32,18 +32,31 @@ extension _PlayerPlayback on PlayerState {
     // 清除可能残留的抑制标记，确保用户手动切集时正常起播；
     // 睡眠定时的监听器会在 notifyListeners 期间重新设置它。
     _suppressAutoPlay = false;
+    // 换书判断必须在改 currentBook 之前取出：下面要靠它决定是否重置倍速，
+    // 队列复用也要靠它确认没有换书。
+    final previousBook = currentBook;
+    final switchingBook = previousBook?.id != book.id;
+    // 先把目标章节挂上并通知界面：后面还要读设置、读本地跳片头配置、
+    // 初始化倍速，全部 await 完才刷新会让用户点完没有任何反应。
+    currentBook = book;
+    currentChapter = chapter;
+    duration = chapter.duration.toDouble();
+    currentTime = startAt ?? 0;
+    error = null;
+    isMiniCollapsed = false;
+    _notifyIfActive();
     await applySettings(appState.settings);
     if (_disposed || playGeneration != _playGeneration) return;
     book = await _withLocalSkipSettings(book);
     if (_disposed || playGeneration != _playGeneration) return;
-    if (currentBook?.id != book.id) await _applyBookSpeed(book);
+    if (switchingBook) await _applyBookSpeed(book);
     if (_disposed || playGeneration != _playGeneration) return;
     var nextChapters = sortChaptersForPlayback(chapterList);
     if (nextChapters.every((item) => item.id != chapter.id)) {
       nextChapters = sortChaptersForPlayback([...nextChapters, chapter]);
     }
-    if (currentBook?.id != book.id) _failedQueueChapters.clear();
-    final reuseQueue = _canReuseAudioQueue(book, nextChapters);
+    if (switchingBook) _failedQueueChapters.clear();
+    final reuseQueue = _canReuseAudioQueue(previousBook, book, nextChapters);
     currentBook = book;
     chapters = nextChapters;
     final resumePosition = startAt ?? _startPositionFor(book, chapter);
