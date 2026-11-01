@@ -73,15 +73,9 @@ class ShellBottomBar extends StatelessWidget {
   /// 设置页会先把导航切回书架再展开，这里按「设置是否打开」判断，
   /// 避免打开设置后底部高亮跳回书架。
   bool _matches(AppDestination destination) {
-    if (destination == AppDestination.mine) {
-      return settingsOpen ||
-          current == AppDestination.mine ||
-          current == AppDestination.personalization ||
-          current == AppDestination.account;
-    }
-    // 设置整页打开时，书架/下载页仍在树里但被遮住，不能继续高亮。
-    if (settingsOpen) return false;
-    return current == destination;
+    // 设置整页打开时，无论之前停在哪个子页，高亮都归到设置。
+    if (settingsOpen) return destination == AppDestination.mine;
+    return rootTabFor(current) == destination;
   }
 }
 

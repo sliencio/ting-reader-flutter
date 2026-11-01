@@ -897,6 +897,35 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('设置子页与书架子页都保持正确的标签高亮', (tester) async {
+    await _pump(tester, const Size(390, 844));
+
+    bool tabSelected(String label) {
+      final widget = tester.widget<Semantics>(find.descendant(
+        of: find.byType(ShellBottomBar),
+        matching: find.byWidgetPredicate(
+            (w) => w is Semantics && w.properties.label == label),
+      ));
+      return widget.properties.selected ?? false;
+    }
+
+    // 从设置进入的收藏页仍属于设置这一层，不能被全部熄灭。
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    await _select(tester, 'Favorites');
+    expect(find.byType(FavoritesPage), findsOneWidget);
+    expect(tabSelected('Settings'), isTrue);
+    expect(tabSelected('Bookshelf'), isFalse);
+
+    // 下载页属于下载标签。
+    await tester.tap(find.byTooltip('Downloads'));
+    await tester.pumpAndSettle();
+    expect(find.byType(DownloadsPage), findsOneWidget);
+    expect(tabSelected('Downloads'), isTrue);
+    expect(tabSelected('Settings'), isFalse);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('设置子页左缘右滑返回设置列表', (tester) async {
     await _pump(tester, const Size(390, 844));
     await tester.tap(find.byTooltip('Settings'));

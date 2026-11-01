@@ -149,6 +149,21 @@ class ShellNavigation {
       };
 }
 
+/// 把任意页面归到它所属的顶层标签。
+///
+/// 底部标签栏和左侧设置导航都只显示三个入口，但可进入的页面有二十多个
+/// （收藏、历史、书单、关于、服务端管理…）。只按「目标页 === 标签页」
+/// 判断高亮时，这些子页面会让所有标签同时熄灭，用户看不出自己在哪。
+/// 统一在这里做归属映射，两处导航共用同一套规则。
+AppDestination rootTabFor(AppDestination destination) => switch (destination) {
+      AppDestination.bookshelf ||
+      AppDestination.search ||
+      AppDestination.home =>
+        AppDestination.bookshelf,
+      AppDestination.downloads => AppDestination.downloads,
+      _ => AppDestination.mine,
+    };
+
 bool isMineDestination(AppDestination destination) => switch (destination) {
       AppDestination.mine ||
       AppDestination.windowSettings ||

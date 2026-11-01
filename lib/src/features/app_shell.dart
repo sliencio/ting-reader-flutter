@@ -609,6 +609,15 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
+  /// 设置侧栏里该高亮哪个入口。
+  ///
+  /// 收藏、历史、书单、关于等页面都归到设置这一层，否则从任一子页返回侧栏时
+  /// 书架和下载都不会高亮，看不出当前所在位置。
+  AppDestination _navHighlight() =>
+      isMineDestination(_navigation.navDestination)
+          ? AppDestination.mine
+          : _navigation.navDestination;
+
   Widget _settingsPanel(
       {bool showNavigation = true, double bottomPadding = 0}) {
     return LayoutBuilder(builder: (context, constraints) {
@@ -630,15 +639,14 @@ class _AppShellState extends State<AppShell> {
                           child: IconButton(
                             icon: Icon(entry.icon),
                             style: IconButton.styleFrom(
-                              backgroundColor: entry.destination ==
-                                      _navigation.navDestination
-                                  ? Theme.of(context)
-                                      .colorScheme
-                                      .secondaryContainer
-                                  : Colors.transparent,
+                              backgroundColor:
+                                  entry.destination == _navHighlight()
+                                      ? Theme.of(context)
+                                          .colorScheme
+                                          .secondaryContainer
+                                      : Colors.transparent,
                             ),
-                            isSelected:
-                                entry.destination == _navigation.navDestination,
+                            isSelected: entry.destination == _navHighlight(),
                             onPressed: () => _go(entry.destination),
                           ))
                       : ListTile(
@@ -646,7 +654,7 @@ class _AppShellState extends State<AppShell> {
                           title: Text(entry.label),
                           selected: app.offlineMode
                               ? entry.destination == AppDestination.downloads
-                              : entry.destination == _navigation.navDestination,
+                              : entry.destination == _navHighlight(),
                           onTap: () => _go(entry.destination),
                         )),
         ]),
