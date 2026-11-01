@@ -107,7 +107,11 @@ class _TabButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final accent = Theme.of(context).colorScheme.primary;
-    final color = selected ? accent : context.mutedText;
+    // 未选中用中性灰而不是正文色：正文色和强调色同为深色，在浅底上
+    // 明暗接近，选中与否看起来几乎一样。
+    final color = selected
+        ? accent
+        : (context.isDark ? AppColors.slate400 : AppColors.slate500);
     return Semantics(
       button: true,
       selected: selected,
@@ -129,8 +133,9 @@ class _TabButton extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
                   decoration: BoxDecoration(
+                    // 选中底色要足够明显，纯色块比低透明度色更容易分辨。
                     color: selected
-                        ? accent.withValues(alpha: context.isDark ? 0.22 : 0.12)
+                        ? accent.withValues(alpha: context.isDark ? 0.30 : 0.16)
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(99),
                   ),
@@ -148,7 +153,7 @@ class _TabButton extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11,
                     height: 1.1,
-                    fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+                    fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
                     color: color,
                   ),
                 ),

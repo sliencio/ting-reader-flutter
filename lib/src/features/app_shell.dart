@@ -652,6 +652,15 @@ class _AppShellState extends State<AppShell> {
                       : ListTile(
                           leading: Icon(entry.icon),
                           title: Text(entry.label),
+                          // 主题里的选中样式只改文字颜色，在侧栏这种浅底卡片上
+                          // 几乎看不出来，这里显式补一层底色和加粗。
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          selectedTileColor: Theme.of(context)
+                              .colorScheme
+                              .primary
+                              .withValues(alpha: 0.12),
                           selected: app.offlineMode
                               ? entry.destination == AppDestination.downloads
                               : entry.destination == _navHighlight(),
