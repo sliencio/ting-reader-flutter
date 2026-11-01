@@ -4,15 +4,15 @@ on:
   workflow_dispatch:
     inputs:
       republish_153:
-        description: '使用当前源码替换 1.5.3 安装包，保留现有发布说明'
+        description: '使用当前源码替换当前版本的安装包，保留现有发布说明'
         type: boolean
         default: false
       ios_only_153:
-        description: '仅重建并替换 iOS 1.5.3，保留其他平台附件及发布说明'
+        description: '仅重建并替换当前版本的 iOS，保留其他平台附件及发布说明'
         type: boolean
         default: false
       apple_only_153:
-        description: '仅补发 iPhone 和 Mac 1.5.3，保留其他附件及发布说明'
+        description: '仅补发当前版本的 iPhone 和 Mac，保留其他附件及发布说明'
         type: boolean
         default: false
   push:
@@ -39,8 +39,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          test "$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)" = '1.5.3'
-          gh release view v1.5.3 --json name,body > /tmp/release-153-before.json
+          VERSION="$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)"
+          test -n "$VERSION"
+          gh release view "v$VERSION" --json name,body > /tmp/release-before.json
+          echo "补发目标：v$VERSION"
       - name: 检查发布版本
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         env:
@@ -304,7 +306,9 @@ jobs:
           else
             BUILD_NAME="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
           fi
-          flutter build macos --release --build-name "$BUILD_NAME" --build-number "$GITHUB_RUN_NUMBER"
+          BUILD_NUMBER="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -s -f2)"
+          test -n "$BUILD_NUMBER"
+          flutter build macos --release --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
       - name: 检查 Mac 签名权限、架构及启动
         run: |
           shopt -s nullglob
@@ -346,7 +350,9 @@ jobs:
           else
             BUILD_NAME="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
           fi
-          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$GITHUB_RUN_NUMBER"
+          BUILD_NUMBER="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -s -f2)"
+          test -n "$BUILD_NUMBER"
+          flutter build ios --release --no-codesign --build-name "$BUILD_NAME" --build-number "$BUILD_NUMBER"
       - run: |
           mkdir -p dist
           mkdir -p dist/Payload
@@ -399,7 +405,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          if [[ "$RELEASE_TAG" == "v1.5.3" ]] && gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" dist/* --clobber
           else
             gh release create "$RELEASE_TAG" dist/* \
@@ -407,22 +413,23 @@ jobs:
               --title "Ting Reader Flutter $RELEASE_TAG" \
               --notes-file release-notes.md
           fi
-      - name: 替换 1.5.3 安装包并保留发布内容
+      - name: 替换当前版本安装包并保留发布内容
         if: inputs.republish_153 == true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          test "$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)" = '1.5.3'
+          VERSION="$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)"
+          test -n "$VERSION"
           for file in ting-reader-flutter-android.apk ting-reader-flutter-android.aab TingReader-windows-x64-setup.exe TingReader-linux-x64.tar.gz TingReader-macos.zip TingReader-ios-self-sign.ipa pubspec.lock; do
             test -s "dist/$file"
           done
-          gh release view v1.5.3 --json name,body > /tmp/release-before.json
-          gh release upload v1.5.3 dist/* --clobber
-          gh release view v1.5.3 --json name,body > /tmp/release-after.json
+          gh release view "v$VERSION" --json name,body > /tmp/release-before.json
+          gh release upload "v$VERSION" dist/* --clobber
+          gh release view "v$VERSION" --json name,body > /tmp/release-after.json
           cmp /tmp/release-before.json /tmp/release-after.json
 
   release_ios_153:
-    name: 仅补发 iOS 1.5.3
+    name: 仅补发 iOS 当前版本
     needs: [ios]
     if: inputs.ios_only_153 == true && inputs.apple_only_153 != true
     runs-on: ubuntu-latest
@@ -436,15 +443,16 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          test "$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)" = '1.5.3'
+          VERSION="$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)"
+          test -n "$VERSION"
           test -s dist/TingReader-ios-self-sign.ipa
-          gh release view v1.5.3 --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa")]}' > /tmp/release-before.json
-          gh release upload v1.5.3 dist/TingReader-ios-self-sign.ipa --clobber
-          gh release view v1.5.3 --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa")]}' > /tmp/release-after.json
+          gh release view "v$VERSION" --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa")]}' > /tmp/release-before.json
+          gh release upload "v$VERSION" dist/TingReader-ios-self-sign.ipa --clobber
+          gh release view "v$VERSION" --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa")]}' > /tmp/release-after.json
           cmp /tmp/release-before.json /tmp/release-after.json
 
   release_apple_153:
-    name: 仅补发 iPhone 和 Mac 1.5.3
+    name: 仅补发 iPhone 和 Mac 当前版本
     needs: [ios, macos]
     if: inputs.apple_only_153 == true
     runs-on: ubuntu-latest
@@ -462,10 +470,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          test "$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)" = '1.5.3'
+          VERSION="$(sed -n 's/^version: \([^+]*\)+.*/\1/p' pubspec.yaml)"
+          test -n "$VERSION"
           test -s dist/TingReader-ios-self-sign.ipa
           test -s dist/TingReader-macos.zip
-          gh release view v1.5.3 --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa" and .name != "TingReader-macos.zip")]}' > /tmp/release-before.json
-          gh release upload v1.5.3 dist/TingReader-ios-self-sign.ipa dist/TingReader-macos.zip --clobber
-          gh release view v1.5.3 --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa" and .name != "TingReader-macos.zip")]}' > /tmp/release-after.json
+          gh release view "v$VERSION" --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa" and .name != "TingReader-macos.zip")]}' > /tmp/release-before.json
+          gh release upload "v$VERSION" dist/TingReader-ios-self-sign.ipa dist/TingReader-macos.zip --clobber
+          gh release view "v$VERSION" --json name,body,assets | jq '{name, body, assets: [.assets[] | select(.name != "TingReader-ios-self-sign.ipa" and .name != "TingReader-macos.zip")]}' > /tmp/release-after.json
           cmp /tmp/release-before.json /tmp/release-after.json
