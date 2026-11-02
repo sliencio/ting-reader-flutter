@@ -275,6 +275,15 @@ class _BookshelfPageState extends State<BookshelfPage> {
     });
   }
 
+  void _scrollToTop() {
+    if (!_scrollController.hasClients) return;
+    _scrollController.animateTo(
+      0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeLetterValue = _activeLetter;
@@ -356,6 +365,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
           onMarkUnread: _selectedBookIds.isNotEmpty && !_updatingReadStatus
               ? () => _markSelectedRead(false)
               : null,
+          onTitleTap: _scrollToTop,
         ),
         const SizedBox(height: 10),
         if (!hasContent)

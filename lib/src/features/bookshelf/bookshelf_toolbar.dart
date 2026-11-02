@@ -2,14 +2,18 @@ part of 'bookshelf_page.dart';
 
 /// 书架主标题：大号粗标题配一行说明，取代带图标的卡片式页头。
 class _ShelfTitle extends StatelessWidget {
-  const _ShelfTitle({required this.selectionMode});
+  const _ShelfTitle({
+    required this.selectionMode,
+    this.onTap,
+  });
 
   final bool selectionMode;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
     final phone = MediaQuery.sizeOf(context).width < 560;
-    return Column(
+    final content = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
@@ -37,6 +41,17 @@ class _ShelfTitle extends StatelessWidget {
         ),
       ],
     );
+
+    if (onTap == null) return content;
+
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.click,
+        child: content,
+      ),
+    );
   }
 }
 
@@ -61,6 +76,7 @@ class _Header extends StatelessWidget {
     required this.onDeleteSelected,
     required this.onMarkRead,
     required this.onMarkUnread,
+    this.onTitleTap,
   });
 
   final bool selectionMode;
@@ -82,6 +98,7 @@ class _Header extends StatelessWidget {
   final VoidCallback? onDeleteSelected;
   final VoidCallback? onMarkRead;
   final VoidCallback? onMarkUnread;
+  final VoidCallback? onTitleTap;
 
   @override
   Widget build(BuildContext context) {
@@ -245,7 +262,10 @@ class _Header extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _ShelfTitle(selectionMode: selectionMode),
+                  _ShelfTitle(
+                    selectionMode: selectionMode,
+                    onTap: onTitleTap,
+                  ),
                   const SizedBox(height: 14),
                   compactToolbar(),
                 ],
@@ -254,7 +274,12 @@ class _Header extends StatelessWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  Expanded(child: _ShelfTitle(selectionMode: selectionMode)),
+                  Expanded(
+                    child: _ShelfTitle(
+                      selectionMode: selectionMode,
+                      onTap: onTitleTap,
+                    ),
+                  ),
                   desktopToolbar,
                 ],
               ),
