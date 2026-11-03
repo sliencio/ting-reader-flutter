@@ -35,6 +35,9 @@ class _ChapterSheetListState extends State<_ChapterSheetList> {
   bool _catalogRequested = false;
   final Map<String, GlobalKey> _chapterKeys = {};
   final Map<int, GlobalKey> _groupKeys = {};
+  ChapterReadSync? _readSync;
+  Set<String> _manuallyReadIds = {};
+  Set<String> _pendingReadIds = {};
 
   @override
   void initState() {
@@ -50,6 +53,32 @@ class _ChapterSheetListState extends State<_ChapterSheetList> {
     if (_catalogRequested) return;
     _catalogRequested = true;
     unawaited(_loadChapterCatalog());
+    _loadReadMarks();
+  }
+
+  void _loadReadMarks() {
+    final book = widget.player.currentBook;
+    if (book == null) return;
+    final app = AppScope.appOf(context);
+    _readSync?.removeListener(_onReadSyncChanged);
+    _readSync = app.chapterReadSync..addListener(_onReadSyncChanged);
+    unawaited(_readSync!.hydrate());
+    _onReadSyncChanged();
+  }
+
+  void _onReadSyncChanged() {
+    final book = widget.player.currentBook;
+    if (!mounted || book == null) return;
+    setState(() {
+      _pendingReadIds = _readSync!.pendingFor(book.id);
+      _manuallyReadIds = _readSync!.confirmedFor(book.id);
+    });
+  }
+
+  @override
+  void dispose() {
+    _readSync?.removeListener(_onReadSyncChanged);
+    super.dispose();
   }
 
   List<Chapter> get _chapterSource =>
@@ -152,6 +181,24 @@ class _ChapterSheetListState extends State<_ChapterSheetList> {
   }
 
   _ChapterProgressLabel? _progressText(BuildContext context, Chapter chapter) {
+    // 优先显示已读标识
+    final manuallyRead = chapter.isRead || _manuallyReadIds.contains(chapter.id);
+    final pendingRead = _pendingReadIds.contains(chapter.id);
+
+    if (pendingRead) {
+      return _ChapterProgressLabel(
+        text: context.localeText('已读·待同步', 'Read · Pending sync'),
+        completed: true,
+      );
+    }
+
+    if (manuallyRead) {
+      return _ChapterProgressLabel(
+        text: context.localeText('已读', 'Read'),
+        completed: true,
+      );
+    }
+
     final position = chapter.progressPosition;
     if (position == null || chapter.duration <= 0) return null;
     final percent = ((position / chapter.duration) * 100).floor();

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api/api_error.dart';
 import '../../core/models/models.dart';
+import '../../core/services/chapter_read_sync.dart';
 import '../../core/state/app_state.dart';
 import '../../core/state/download_state.dart';
 import '../../core/state/player_state.dart';

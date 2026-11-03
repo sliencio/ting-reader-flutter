@@ -99,6 +99,19 @@ class ChapterReadSync extends ChangeNotifier {
     }
   }
 
+  /// 仅把已落盘的已读记录读入内存并通知监听者。
+  ///
+  /// 播放页的章节弹层不一定经过书籍详情页，没有这一步就拿不到已同步成功
+  /// 的已读记录，列表里也就看不到已读标识。
+  Future<void> hydrate() {
+    final owner = identity();
+    return _serial(() async {
+      if (!_active(owner)) return;
+      await _load(owner);
+      _notify();
+    });
+  }
+
   Future<void> migrate(String book) {
     final owner = identity();
     return _serial(() async {
