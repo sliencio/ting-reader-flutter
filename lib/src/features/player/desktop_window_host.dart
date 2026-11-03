@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/services/desktop_window.dart';
 import '../../core/utils/locale.dart';
 import '../../shared/app_scope.dart';
+import 'micro_player_window.dart';
 import 'small_player_window.dart';
 
 class DesktopWindowHost extends StatefulWidget {
@@ -44,23 +45,30 @@ class _DesktopWindowHostState extends State<DesktopWindowHost> {
 
   Widget _buildScene(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
-    final showTitleBar = window.usesCustomTitleBar || window.isMini;
-    if (!window.isMini) {
+    final compact = window.mode != DesktopWindowMode.normal;
+    // 小小窗不显示标题栏，进度线直接贴顶，高度留给播放控制。
+    final showTitleBar =
+        (window.usesCustomTitleBar || compact) && !window.isMicro;
+    if (!compact) {
       window.normalSize = Size(size.width,
           (size.height - (showTitleBar ? 34 : 0)).clamp(0, double.infinity));
     }
     return Material(
       color: Theme.of(context).colorScheme.surface,
       child: Column(children: [
-        if (showTitleBar) _WindowTitleBar(openChapters: widget.openChapters),
+        if (showTitleBar)
+          _WindowTitleBar(
+            openChapters: widget.openChapters,
+            compact: window.isMicro,
+          ),
         Expanded(
             child: Stack(fit: StackFit.expand, children: [
           Offstage(
-            offstage: window.isMini,
+            offstage: compact,
             child: TickerMode(
-              enabled: !window.isMini,
+              enabled: !compact,
               child: ExcludeFocus(
-                excluding: window.isMini,
+                excluding: compact,
                 child: OverflowBox(
                   minWidth: window.normalSize.width,
                   maxWidth: window.normalSize.width,
@@ -74,7 +82,12 @@ class _DesktopWindowHostState extends State<DesktopWindowHost> {
               ),
             ),
           ),
-          if (window.isMini)
+          if (window.isMicro)
+            MicroPlayerWindow(
+              openChapters: widget.openChapters,
+              onExpand: () => window.setMode(DesktopWindowMode.mini),
+            )
+          else if (window.isMini)
             SmallPlayerWindow(openChapters: widget.openChapters),
         ])),
       ]),
@@ -90,22 +103,25 @@ class _DesktopWindowHostState extends State<DesktopWindowHost> {
 }
 
 class _WindowTitleBar extends StatelessWidget {
-  const _WindowTitleBar({required this.openChapters});
+  const _WindowTitleBar({required this.openChapters, this.compact = false});
   final Future<void> Function() openChapters;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
     final window = DesktopWindow.instance;
+    final height = compact ? 28.0 : 34.0;
+    final buttonWidth = compact ? 38.0 : 44.0;
     Widget button(String label, WindowCaptionAction icon,
             Future<void> Function() action,
             {bool close = false}) =>
         SizedBox(
-            width: 44,
-            height: 34,
+            width: buttonWidth,
+            height: height,
             child: IconButton(
               tooltip: label,
               padding: EdgeInsets.zero,
-              iconSize: 17,
+              iconSize: compact ? 14 : 17,
               style: ButtonStyle(
                 shape: const WidgetStatePropertyAll(RoundedRectangleBorder()),
                 backgroundColor: WidgetStateProperty.resolveWith((states) =>
@@ -121,7 +137,7 @@ class _WindowTitleBar extends StatelessWidget {
               onPressed: action,
             ));
     return SizedBox(
-        height: 34,
+        height: height,
         child: Row(children: [
           MenuAnchor(
             menuChildren: [
@@ -130,40 +146,96 @@ class _WindowTitleBar extends StatelessWidget {
                       ? openChapters
                       : null,
                   child: Text(context.localeText('章节列表', 'Chapters'))),
+              const Divider(height: 1),
+              MenuItemButton(
+                  leadingIcon: Icon(
+                    Icons.radio_button_checked_rounded,
+                    size: 16,
+                    color: window.mode == DesktopWindowMode.normal
+                        ? null
+                        : Colors.transparent,
+                  ),
+                  onPressed: () => window.setMode(DesktopWindowMode.normal),
+                  child: Text(context.localeText('普通窗口', 'Normal window'))),
+              MenuItemButton(
+                  leadingIcon: Icon(
+                    Icons.radio_button_checked_rounded,
+                    size: 16,
+                    color: window.isMini ? null : Colors.transparent,
+                  ),
+                  onPressed: () => window.setMode(DesktopWindowMode.mini),
+                  child: Text(context.localeText('小窗模式', 'Mini window'))),
+              MenuItemButton(
+                  leadingIcon: Icon(
+                    Icons.radio_button_checked_rounded,
+                    size: 16,
+                    color: window.isMicro ? null : Colors.transparent,
+                  ),
+                  onPressed: () => window.setMode(DesktopWindowMode.micro),
+                  child: Text(context.localeText('小小窗模式', 'Micro window'))),
+              const Divider(height: 1),
               MenuItemButton(
                   onPressed: window.requestExit,
                   child: Text(context.localeText('退出软件', 'Exit application'))),
             ],
-            builder: (context, controller, _) => IconButton(
-                tooltip: context.localeText('窗口菜单', 'Window menu'),
-                icon: const Icon(Icons.headphones_rounded, size: 18),
-                onPressed: () =>
-                    controller.isOpen ? controller.close() : controller.open()),
+            builder: (context, controller, _) => SizedBox(
+                width: compact ? 34 : 48,
+                height: height,
+                child: IconButton(
+                    tooltip: context.localeText('窗口菜单', 'Window menu'),
+                    padding: EdgeInsets.zero,
+                    iconSize: compact ? 15 : 18,
+                    icon: const Icon(Icons.headphones_rounded),
+                    onPressed: () => controller.isOpen
+                        ? controller.close()
+                        : controller.open())),
           ),
           Expanded(
               child: GestureDetector(
             behavior: HitTestBehavior.opaque,
             onPanStart: (_) => window.startDragging(),
-            onDoubleTap: window.isMini ? null : window.toggleMaximize,
+            onDoubleTap: compact ? null : window.toggleMaximize,
             child: Align(
                 alignment: Alignment.centerLeft,
                 child: Text(
-                    context.localeText(window.isMini ? '听悦 · 小窗' : '听悦',
-                        window.isMini ? 'Ting Reader · Mini' : 'Ting Reader'),
+                    context.localeText(
+                        window.isMicro
+                            ? '听悦 · 小小窗'
+                            : window.isMini
+                                ? '听悦 · 小窗'
+                                : '听悦',
+                        window.isMicro
+                            ? 'Ting Reader · Micro'
+                            : window.isMini
+                                ? 'Ting Reader · Mini'
+                                : 'Ting Reader'),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.labelLarge)),
           )),
           button(
-              context.localeText(window.isMini ? '返回主窗口' : '小窗模式',
-                  window.isMini ? 'Restore window' : 'Mini window'),
-              window.isMini
+              context.localeText(window.isMicro ? '放大小窗' : '小小窗模式',
+                  window.isMicro ? 'Enlarge window' : 'Micro window'),
+              window.isMicro
                   ? WindowCaptionAction.restore
-                  : WindowCaptionAction.mini,
-              () => window.setMini(!window.isMini)),
-          button(context.localeText('最小化', 'Minimize'),
-              WindowCaptionAction.minimize, window.minimize),
-          if (!window.isMini)
+                  : WindowCaptionAction.micro,
+              () => window.setMode(window.isMicro
+                  ? DesktopWindowMode.mini
+                  : DesktopWindowMode.micro)),
+          if (!window.isMicro)
+            button(
+                context.localeText(window.isMini ? '返回主窗口' : '小窗模式',
+                    window.isMini ? 'Restore window' : 'Mini window'),
+                window.isMini
+                    ? WindowCaptionAction.restore
+                    : WindowCaptionAction.mini,
+                () => window.setMode(window.isMini
+                    ? DesktopWindowMode.normal
+                    : DesktopWindowMode.mini)),
+          if (!window.isMicro)
+            button(context.localeText('最小化', 'Minimize'),
+                WindowCaptionAction.minimize, window.minimize),
+          if (window.mode == DesktopWindowMode.normal)
             button(
                 context.localeText(window.isMaximized ? '还原' : '最大化',
                     window.isMaximized ? 'Restore size' : 'Maximize'),
@@ -178,7 +250,7 @@ class _WindowTitleBar extends StatelessWidget {
   }
 }
 
-enum WindowCaptionAction { mini, restore, minimize, maximize, close }
+enum WindowCaptionAction { micro, mini, restore, minimize, maximize, close }
 
 class WindowCaptionIcon extends StatelessWidget {
   const WindowCaptionIcon(this.action, {super.key});
@@ -230,6 +302,9 @@ class _WindowCaptionPainter extends CustomPainter {
       case WindowCaptionAction.mini:
         canvas.drawRect(const Rect.fromLTWH(2, 3, 14, 12), paint);
         canvas.drawRect(const Rect.fromLTWH(9, 9, 5, 4), paint);
+      case WindowCaptionAction.micro:
+        canvas.drawRect(const Rect.fromLTWH(2, 3, 14, 12), paint);
+        canvas.drawRect(const Rect.fromLTWH(9, 10, 6, 4), paint);
     }
     canvas.restore();
   }

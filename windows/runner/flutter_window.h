@@ -25,8 +25,9 @@ class FlutterWindow : public Win32Window {
                          LPARAM const lparam) noexcept override;
 
  private:
-  void SetMiniMode(bool enabled);
-  bool mini_mode_ = false;
+  void SetWindowMode(const std::string& mode);
+  // 空字符串表示普通窗口，否则为 "mini" 或 "micro"。
+  std::string window_mode_;
   std::string close_behavior_ = "ask";
   WINDOWPLACEMENT normal_placement_{sizeof(WINDOWPLACEMENT)};
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;

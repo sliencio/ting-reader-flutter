@@ -19,6 +19,7 @@ import 'src/shared/common/common_widgets.dart';
 import 'src/core/services/desktop_window.dart';
 import 'src/features/player/desktop_window_host.dart';
 import 'src/features/player/mini_player.dart';
+import 'src/features/player/player_shortcuts.dart';
 
 final _appNavigatorKey = GlobalKey<NavigatorState>();
 bool _closeDialogOpen = false;
@@ -27,8 +28,17 @@ Future<void> _handleWindowClose(AppState app) async {
   if (_closeDialogOpen) return;
   _closeDialogOpen = true;
   try {
-    if (DesktopWindow.instance.isMini) {
-      await DesktopWindow.instance.setMini(false);
+    // 小窗与小小窗把主界面放进 Offstage，对话框会绘制在不可见区域，
+    // 表现为"点了关闭没反应"。紧凑窗口里直接退出。
+    if (DesktopWindow.instance.mode != DesktopWindowMode.normal) {
+      final compactContext = _appNavigatorKey.currentContext;
+      if (compactContext != null && compactContext.mounted) {
+        await AppScope.playerOf(compactContext)
+            .sendProgress()
+            .timeout(const Duration(seconds: 2), onTimeout: () {});
+      }
+      await DesktopWindow.instance.exit();
+      return;
     }
     final context = _appNavigatorKey.currentContext;
     if (context == null || !context.mounted) return;
@@ -173,16 +183,18 @@ class TingReaderApp extends StatelessWidget {
           localizationsDelegates: AppLocalizations.localizationsDelegates,
           supportedLocales: AppLocalizations.supportedLocales,
           builder: (context, child) {
-            final content = DesktopWindowHost(
-                child: child ?? const SizedBox.shrink(),
-                openChapters: () async {
-                  await DesktopWindow.instance.setMini(false);
-                  final context = _appNavigatorKey.currentContext;
-                  if (context != null && context.mounted) {
-                    await showPlayerChapters(
-                        context, AppScope.playerOf(context));
-                  }
-                });
+            final content = PlayerShortcuts(
+              child: DesktopWindowHost(
+                  child: child ?? const SizedBox.shrink(),
+                  openChapters: () async {
+                    await DesktopWindow.instance.setMini(false);
+                    final context = _appNavigatorKey.currentContext;
+                    if (context != null && context.mounted) {
+                      await showPlayerChapters(
+                          context, AppScope.playerOf(context));
+                    }
+                  }),
+            );
             final brightness = Theme.of(context).brightness;
             final isDark = brightness == Brightness.dark;
             final background = Theme.of(context).scaffoldBackgroundColor;

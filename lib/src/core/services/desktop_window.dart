@@ -3,6 +3,9 @@ import 'package:flutter/services.dart';
 
 import '../state/app_state.dart';
 
+/// 桌面窗口的三种形态：普通窗口、小窗、小小窗。
+enum DesktopWindowMode { normal, mini, micro }
+
 class DesktopWindow extends ChangeNotifier {
   static final instance = DesktopWindow();
   static const _channel = MethodChannel('ting_reader/window');
@@ -12,12 +15,18 @@ class DesktopWindow extends ChangeNotifier {
           .contains(defaultTargetPlatform);
   bool get usesCustomTitleBar =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
-  bool isMini = false;
+  DesktopWindowMode _mode = DesktopWindowMode.normal;
+  DesktopWindowMode get mode => _mode;
+  bool get isMini => _mode == DesktopWindowMode.mini;
+  bool get isMicro => _mode == DesktopWindowMode.micro;
   Size normalSize = const Size(1280, 720);
   String closeBehavior = 'ask';
   bool isMaximized = false;
   Future<void> Function()? onCloseRequested;
   Future<void> Function()? onExitRequested;
+
+  /// 系统媒体键（WM_APPCOMMAND）回调：playPause / next / previous / forward / rewind。
+  void Function(String command)? mediaCommand;
   AppState? _app;
   VoidCallback? _syncPreferences;
 
@@ -35,6 +44,10 @@ class DesktopWindow extends ChangeNotifier {
           notifyListeners();
         }
       }
+      if (call.method == 'mediaCommand') {
+        final command = call.arguments;
+        if (command is String) mediaCommand?.call(command);
+      }
     });
     void sync() {
       final value = app.settings['desktop_close_behavior']?.toString();
@@ -50,18 +63,22 @@ class DesktopWindow extends ChangeNotifier {
     sync();
   }
 
-  Future<void> setMini(bool value) async {
-    if (!supported || value == isMini) return;
-    isMini = value;
+  Future<void> setMode(DesktopWindowMode value) async {
+    if (!supported || value == _mode) return;
+    final previous = _mode;
+    _mode = value;
     notifyListeners();
     try {
-      await _channel.invokeMethod<void>('setMiniMode', value);
+      await _channel.invokeMethod<void>('setWindowMode', value.name);
     } catch (_) {
-      isMini = !value;
+      _mode = previous;
       notifyListeners();
       rethrow;
     }
   }
+
+  Future<void> setMini(bool value) =>
+      setMode(value ? DesktopWindowMode.mini : DesktopWindowMode.normal);
 
   Future<void> minimize() => _channel.invokeMethod<void>('minimize');
   Future<void> exit() => _channel.invokeMethod<void>('exit');

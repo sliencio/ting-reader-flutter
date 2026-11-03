@@ -30,8 +30,23 @@ void main() {
     expect(window.isMini, isTrue);
     await window.setMini(false);
     expect(window.isMini, isFalse);
-    expect(calls.map((call) => call.method), ['setMiniMode', 'setMiniMode']);
-    expect(calls.map((call) => call.arguments), [true, false]);
+    expect(
+        calls.map((call) => call.method), ['setWindowMode', 'setWindowMode']);
+    expect(calls.map((call) => call.arguments), ['mini', 'normal']);
+  });
+
+  test('micro mode switches between compact sizes without a detour', () async {
+    final window = DesktopWindow();
+    addTearDown(window.dispose);
+    await window.setMode(DesktopWindowMode.micro);
+    expect(window.isMicro, isTrue);
+    expect(window.isMini, isFalse);
+    await window.setMode(DesktopWindowMode.mini);
+    expect(window.isMini, isTrue);
+    expect(window.isMicro, isFalse);
+    await window.setMode(DesktopWindowMode.normal);
+    expect(window.mode, DesktopWindowMode.normal);
+    expect(calls.map((call) => call.arguments), ['micro', 'mini', 'normal']);
   });
 
   for (final platform in TargetPlatform.values) {

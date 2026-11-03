@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../core/state/player_state.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/locale.dart';
 import '../../core/utils/urls.dart';
@@ -14,11 +15,6 @@ class SmallPlayerWindow extends StatelessWidget {
   Widget build(BuildContext context) {
     final player = AppScope.playerOf(context);
     final book = player.currentBook;
-    final duration =
-        player.duration.isFinite && player.duration > 0 ? player.duration : 1.0;
-    final position = player.currentTime.isFinite
-        ? player.currentTime.clamp(0.0, duration)
-        : 0.0;
     return Material(
       color: Theme.of(context).colorScheme.surface,
       child: Padding(
@@ -56,21 +52,8 @@ class SmallPlayerWindow extends StatelessWidget {
                 SizedBox(
                     height: 26,
                     child: Row(children: [
-                      Text(formatDurationShort(position),
-                          style: Theme.of(context).textTheme.labelSmall),
-                      Expanded(
-                          child: SliderTheme(
-                              data: SliderTheme.of(context).copyWith(
-                                  trackHeight: 2,
-                                  thumbShape: const RoundSliderThumbShape(
-                                      enabledThumbRadius: 5),
-                                  overlayShape: const RoundSliderOverlayShape(
-                                      overlayRadius: 10)),
-                              child: Slider(
-                                  value: position,
-                                  max: duration,
-                                  onChanged:
-                                      player.hasChapter ? player.seek : null))),
+                      _SmallWindowTime(value: player.currentTime),
+                      Expanded(child: _SmallWindowProgress(player: player)),
                     ])),
               ])),
           const SizedBox(width: 4),
@@ -94,6 +77,69 @@ class SmallPlayerWindow extends StatelessWidget {
               icon: const Icon(Icons.skip_next_rounded),
               onPressed: player.hasChapter ? player.nextChapter : null),
         ]),
+      ),
+    );
+  }
+}
+
+class _SmallWindowTime extends StatelessWidget {
+  const _SmallWindowTime({required this.value});
+
+  final double value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(formatDurationShort(value),
+        style: Theme.of(context).textTheme.labelSmall);
+  }
+}
+
+/// 小窗进度条：拖动期间只更新本地值，松手后才真正跳转。
+///
+/// 直接在 onChanged 里调用 player.seek 会让每一帧都触发音频跳转与
+/// 进度上报，拖动因此明显卡顿。
+class _SmallWindowProgress extends StatefulWidget {
+  const _SmallWindowProgress({required this.player});
+
+  final PlayerState player;
+
+  @override
+  State<_SmallWindowProgress> createState() => _SmallWindowProgressState();
+}
+
+class _SmallWindowProgressState extends State<_SmallWindowProgress> {
+  double? _dragValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final player = widget.player;
+    final duration =
+        player.duration.isFinite && player.duration > 0 ? player.duration : 1.0;
+    final position = player.currentTime.isFinite
+        ? player.currentTime.clamp(0.0, duration)
+        : 0.0;
+    final value = (_dragValue ?? position).clamp(0.0, duration);
+    return SliderTheme(
+      data: SliderTheme.of(context).copyWith(
+          trackHeight: 2,
+          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
+          overlayShape: const RoundSliderOverlayShape(overlayRadius: 10)),
+      child: Slider(
+        min: 0,
+        max: duration,
+        value: value,
+        onChanged: player.hasChapter
+            ? (next) => setState(() => _dragValue = next)
+            : null,
+        onChangeStart: player.hasChapter
+            ? (_) => setState(() => _dragValue = position)
+            : null,
+        onChangeEnd: player.hasChapter
+            ? (next) {
+                setState(() => _dragValue = null);
+                player.seek(next);
+              }
+            : null,
       ),
     );
   }

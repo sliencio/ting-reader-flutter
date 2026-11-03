@@ -2,6 +2,7 @@
 
 #include <optional>
 #include <flutter/standard_method_codec.h>
+#include <windowsx.h>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "window_tasks.h"
@@ -43,10 +44,10 @@ bool FlutterWindow::OnCreate() {
   window_channel_->SetMethodCallHandler(
       [this](const auto& call, auto result) {
         const auto& method = call.method_name();
-        if (method == "setMiniMode") {
-          const auto* value = std::get_if<bool>(call.arguments());
-          if (!value) { result->Error("arguments", "小窗参数无效"); return; }
-          SetMiniMode(*value);
+        if (method == "setWindowMode") {
+          const auto* value = std::get_if<std::string>(call.arguments());
+          if (!value) { result->Error("arguments", "窗口模式参数无效"); return; }
+          SetWindowMode(*value);
         } else if (method == "setCloseBehavior") {
           const auto* value = std::get_if<std::string>(call.arguments());
           if (!value) { result->Error("arguments", "关闭行为无效"); return; }
@@ -107,12 +108,46 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     window_channel_->InvokeMethod("maximizedChanged",
         std::make_unique<flutter::EncodableValue>(wparam == SIZE_MAXIMIZED));
   }
-  if (message == WM_GETMINMAXINFO && mini_mode_) {
+  if (message == WM_GETMINMAXINFO && !window_mode_.empty()) {
     auto limits = reinterpret_cast<MINMAXINFO*>(lparam);
     const auto dpi = GetDpiForWindow(hwnd);
-    limits->ptMinTrackSize.x = MulDiv(420, dpi, 96);
-    limits->ptMinTrackSize.y = MulDiv(140, dpi, 96);
+    const bool micro = window_mode_ == "micro";
+    limits->ptMinTrackSize.x = MulDiv(micro ? 240 : 420, dpi, 96);
+    limits->ptMinTrackSize.y = MulDiv(micro ? 50 : 142, dpi, 96);
     return 0;
+  }
+  if (message == WM_APPCOMMAND && window_channel_) {
+    // 系统媒体键与耳机按键会以 WM_APPCOMMAND 到达，转成 Dart 侧的播放指令。
+    const WORD command = GET_APPCOMMAND_LPARAM(lparam);
+    const char* name = nullptr;
+    switch (command) {
+      case APPCOMMAND_MEDIA_PLAY_PAUSE:
+      case APPCOMMAND_MEDIA_PLAY:
+      case APPCOMMAND_MEDIA_PAUSE:
+      case APPCOMMAND_MEDIA_STOP:
+        name = "playPause";
+        break;
+      case APPCOMMAND_MEDIA_NEXTTRACK:
+        name = "next";
+        break;
+      case APPCOMMAND_MEDIA_PREVIOUSTRACK:
+        name = "previous";
+        break;
+      case APPCOMMAND_MEDIA_FAST_FORWARD:
+        name = "forward";
+        break;
+      case APPCOMMAND_MEDIA_REWIND:
+        name = "rewind";
+        break;
+      default:
+        break;
+    }
+    if (name != nullptr) {
+      window_channel_->InvokeMethod(
+          "mediaCommand",
+          std::make_unique<flutter::EncodableValue>(std::string(name)));
+      return 0;
+    }
   }
   if (message == WM_CLOSE) {
     if (close_behavior_ == "minimize") {
@@ -143,21 +178,27 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
 }
 
-void FlutterWindow::SetMiniMode(bool enabled) {
-  if (mini_mode_ == enabled) return;
+void FlutterWindow::SetWindowMode(const std::string& mode) {
+  if (mode == window_mode_) return;
   const HWND window = GetHandle();
-  if (enabled) {
+  const bool leaving_compact = mode == "normal";
+  if (window_mode_.empty() && !leaving_compact) {
+    // 从普通窗口进入紧凑窗口前，记住原来的位置与尺寸。
     GetWindowPlacement(window, &normal_placement_);
     ShowWindow(window, SW_RESTORE);
-    RECT bounds;
-    GetWindowRect(window, &bounds);
-    const auto dpi = GetDpiForWindow(window);
-    SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
-                 MulDiv(560, dpi, 96), MulDiv(156, dpi, 96), SWP_SHOWWINDOW);
-  } else {
+  }
+  RECT bounds;
+  GetWindowRect(window, &bounds);
+  const auto dpi = GetDpiForWindow(window);
+  if (leaving_compact) {
     SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     SetWindowPlacement(window, &normal_placement_);
+  } else {
+    const bool micro = mode == "micro";
+    SetWindowPos(window, HWND_TOPMOST, bounds.left, bounds.top,
+                 MulDiv(micro ? 300 : 560, dpi, 96),
+                 MulDiv(micro ? 66 : 156, dpi, 96), SWP_SHOWWINDOW);
   }
-  mini_mode_ = enabled;
+  window_mode_ = leaving_compact ? std::string() : mode;
 }

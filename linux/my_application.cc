@@ -13,7 +13,7 @@ struct _MyApplication {
   GtkWindow* window;
   FlMethodChannel* window_channel;
   gchar* close_behavior;
-  gboolean mini_mode;
+  gchar* window_mode;
   gint normal_width;
   gint normal_height;
   gint normal_x;
@@ -42,23 +42,37 @@ static void handle_window_method(FlMethodChannel*, FlMethodCall* call,
   const gchar* method = fl_method_call_get_name(call);
   FlValue* args = fl_method_call_get_args(call);
   g_autoptr(FlValue) value = nullptr;
-  if (g_strcmp0(method, "setMiniMode") == 0) {
-    const gboolean enabled = args && fl_value_get_type(args) == FL_VALUE_TYPE_BOOL &&
-                             fl_value_get_bool(args);
-    if (enabled && !self->mini_mode) {
+  if (g_strcmp0(method, "setWindowMode") == 0) {
+    const gchar* mode = args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING
+                            ? fl_value_get_string(args)
+                            : "normal";
+    const gboolean enabled = g_strcmp0(mode, "normal") != 0;
+    if (enabled && !self->window_mode) {
       gtk_window_get_size(self->window, &self->normal_width, &self->normal_height);
       gtk_window_get_position(self->window, &self->normal_x, &self->normal_y);
       self->normal_maximized = gtk_window_is_maximized(self->window);
       gtk_window_unmaximize(self->window);
-      gtk_window_resize(self->window, 560, 174);
+      if (g_strcmp0(mode, "micro") == 0) {
+        gtk_window_resize(self->window, 300, 64);
+      } else {
+        gtk_window_resize(self->window, 560, 156);
+      }
       gtk_window_set_keep_above(self->window, TRUE);
-    } else if (!enabled && self->mini_mode) {
+    } else if (enabled && self->window_mode) {
+      // 小窗与小小窗之间切换时保留原窗口位置，只调整尺寸。
+      if (g_strcmp0(mode, "micro") == 0) {
+        gtk_window_resize(self->window, 300, 64);
+      } else {
+        gtk_window_resize(self->window, 560, 156);
+      }
+    } else if (!enabled && self->window_mode) {
       gtk_window_set_keep_above(self->window, FALSE);
       gtk_window_resize(self->window, self->normal_width, self->normal_height);
       gtk_window_move(self->window, self->normal_x, self->normal_y);
       if (self->normal_maximized) gtk_window_maximize(self->window);
     }
-    self->mini_mode = enabled;
+    g_free(self->window_mode);
+    self->window_mode = enabled ? g_strdup(mode) : nullptr;
   } else if (g_strcmp0(method, "setCloseBehavior") == 0) {
     g_free(self->close_behavior);
     self->close_behavior = g_strdup(args && fl_value_get_type(args) == FL_VALUE_TYPE_STRING
@@ -170,6 +184,7 @@ static void my_application_dispose(GObject* object) {
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   g_clear_object(&self->window_channel);
   g_clear_pointer(&self->close_behavior, g_free);
+  g_clear_pointer(&self->window_mode, g_free);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }
 
