@@ -182,7 +182,8 @@ class _ChapterSheetListState extends State<_ChapterSheetList> {
 
   _ChapterProgressLabel? _progressText(BuildContext context, Chapter chapter) {
     // 优先显示已读标识
-    final manuallyRead = chapter.isRead || _manuallyReadIds.contains(chapter.id);
+    final manuallyRead =
+        chapter.isRead || _manuallyReadIds.contains(chapter.id);
     final pendingRead = _pendingReadIds.contains(chapter.id);
 
     if (pendingRead) {
