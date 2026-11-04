@@ -234,6 +234,7 @@ class _ChapterSheetListState extends State<_ChapterSheetList> {
   Future<void> _playChapter(Chapter chapter) async {
     final book = widget.player.currentBook;
     if (book == null) return;
+    widget.player.previewChapterSelection(book, chapter);
     await widget.player.playChapter(book, _chapterSource, chapter);
   }
 
@@ -552,10 +553,11 @@ class _ChapterSheetListState extends State<_ChapterSheetList> {
                                               accent: accent,
                                               onAccent: onAccent,
                                               onTap: () async {
+                                                // 先收起弹层再起播：playChapter
+                                                // 要准备音源，等它返回才关闭会让
+                                                // 用户觉得点完卡了一阵。
+                                                Navigator.pop(context);
                                                 await _playChapter(chapter);
-                                                if (context.mounted) {
-                                                  Navigator.pop(context);
-                                                }
                                               },
                                               onDownload: () =>
                                                   _downloadChapter(

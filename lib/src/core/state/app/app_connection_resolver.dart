@@ -109,19 +109,61 @@ class _AppConnectionResolver {
     resolvingRedirect = true;
     _onChanged();
     try {
+      // 局域网与外网并行探测，谁先通就用谁、其余立刻放弃。
+      //
+      // 原实现按候选顺序串行探测：内网不通时要把 connectTimeout 走满
+      // 才开始试外网，登录因此被拖慢十几秒。
+      final winner = Completer<RedirectResolution?>();
+      final loserToken = CancelToken();
+      void cancelLosers() {
+        if (!loserToken.isCancelled) loserToken.cancel('route resolved');
+      }
+
+      final probeTokens = <CancelToken>[];
+      final running = <Future<void>>[];
       for (final candidate in candidates) {
-        checkCancelled();
-        final resolution = await _resolveReachableServerUrl(
-          candidate,
-          force: force,
-          quick: quick,
-          cancelToken: cancelToken,
-        );
-        checkCancelled();
-        if (resolution != null) {
-          lastRedirectResolution = resolution;
-          return resolution;
-        }
+        final combined = CancelToken();
+        probeTokens.add(combined);
+        // 外部取消（用户取消启动）要能同时打断所有分支。
+        cancelToken?.whenCancel.then((_) {
+          if (!combined.isCancelled) combined.cancel('startup cancelled');
+        });
+        loserToken.whenCancel.then((_) {
+          if (!combined.isCancelled) combined.cancel('route resolved');
+        });
+        running.add(() async {
+          try {
+            checkCancelled();
+            final resolution = await _resolveReachableServerUrl(
+              candidate,
+              force: force,
+              quick: quick,
+              cancelToken: combined,
+            );
+            checkCancelled();
+            if (resolution != null && !winner.isCompleted) {
+              winner.complete(resolution);
+              cancelLosers();
+            }
+          } on _StartupCancelled {
+            // 用户取消启动：把取消信号交回调用方，不要吞掉。
+            if (!winner.isCompleted) {
+              winner.completeError(const _StartupCancelled());
+            }
+            cancelLosers();
+          } catch (_) {
+            // 这个候选不可达，交给其他分支。
+          }
+        }());
+      }
+      unawaited(Future.wait(running).then((_) {
+        if (!winner.isCompleted) winner.complete(null);
+      }));
+
+      final resolved = await winner.future;
+      if (resolved != null) {
+        lastRedirectResolution = resolved;
+        return resolved;
       }
       throw StateError(textForLocale(
         '无法连接服务器',

@@ -248,11 +248,11 @@ class _StartupGateState extends State<StartupGate> {
       await appState.initialize(isCancelled: () => _cancelled);
       if (_cancelled) return;
       await playerState.applySettings(appState.settings);
-      try {
-        await downloadState.initialize();
-      } catch (_) {
+      // 下载状态初始化包含建目录、读索引、连 Connectivity 插件和扫描缓存，
+      // 在 iOS 上要好几秒。它不影响进入主界面，先放后台跑，别卡住启动页。
+      unawaited(downloadState.initialize().catchError((Object _) {
         // Downloads are recoverable local state; keep the app bootable.
-      }
+      }));
       appState.startSessionMonitoring();
     } catch (_) {
       if (!_cancelled) {

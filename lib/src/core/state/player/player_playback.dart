@@ -210,12 +210,18 @@ extension _PlayerPlayback on PlayerState {
       if (_audio.playing) await pause();
       return;
     }
-    await _prepareSmartResume();
-    if (_selectionPending ||
+    final shouldStart = _selectionPending ||
         error != null ||
         (!_audio.playing &&
             (_audio.processingState == audio.ProcessingState.completed ||
-                _audio.processingState == audio.ProcessingState.idle))) {
+                _audio.processingState == audio.ProcessingState.idle));
+    if (shouldStart) {
+      // 起播前还要读设置、准备音源，先切到加载态，按钮立刻转圈。
+      _connectingPlayback = true;
+      _notifyIfActive();
+    }
+    await _prepareSmartResume();
+    if (shouldStart) {
       final atEnd = _audio.processingState == audio.ProcessingState.completed;
       final intro = _introPositionFor(currentBook!, currentChapter!);
       await playChapter(currentBook!, chapters, currentChapter!,

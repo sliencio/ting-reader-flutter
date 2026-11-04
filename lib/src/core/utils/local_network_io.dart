@@ -5,6 +5,10 @@ import 'package:network_info_plus/network_info_plus.dart';
 
 import 'ipv4_subnet.dart';
 
+/// 判定服务器是否在同一 IPv4 子网。
+///
+/// 结果只用于给候选地址排序：真正的可达性由并行 HTTP 探测决定，
+/// 所以这里宁可快速返回 null，也不要卡住启动流程。
 Future<bool?> isServerOnCurrentIpv4Subnet(String serverUrl) async {
   final uri = Uri.tryParse(serverUrl);
   if (uri == null || uri.host.isEmpty) return null;
@@ -52,7 +56,7 @@ Future<void> _appendPluginNetwork(List<_Ipv4Network> networks) async {
     final values = await Future.wait([
       info.getWifiIP(),
       info.getWifiSubmask(),
-    ]).timeout(const Duration(seconds: 2));
+    ]).timeout(const Duration(milliseconds: 600));
     final address = values[0];
     final mask = values[1];
     if (address == null || mask == null) return;
@@ -82,7 +86,7 @@ $items = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         '-Command',
         script,
       ],
-    ).timeout(const Duration(seconds: 3));
+    ).timeout(const Duration(milliseconds: 700));
     if (result.exitCode == 0 && result.stdout.toString().trim().isNotEmpty) {
       final decoded = jsonDecode(result.stdout.toString().trim());
       final items = decoded is List ? decoded : [decoded];
@@ -96,7 +100,7 @@ $items = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
 
   try {
     final result = await Process.run('ipconfig', const ['/all'])
-        .timeout(const Duration(seconds: 2));
+        .timeout(const Duration(milliseconds: 700));
     if (result.exitCode != 0) return const [];
     final expression = RegExp(
       r'IPv4[^\r\n]*:\s*(\d+\.\d+\.\d+\.\d+)[^\r\n]*\r?\n'

@@ -124,9 +124,12 @@ extension _AppStateCredentials on AppState {
             item.serverUrl.isNotEmpty || item.localServerUrl.isNotEmpty)
         .toList();
     final hydrated = <SavedServerProfile>[];
-    for (final profile in profiles) {
-      hydrated.add(await _hydrateServerProfileSecrets(profile));
-    }
+    // 索引里的每个 profile 都要依次访问钥匙串。iOS 上钥匙串调用是同步 IPC，
+    // 逐个 await 请求会叠加成明显的启动延迟，所以并发读取。
+    final results = await Future.wait(
+      profiles.map(_hydrateServerProfileSecrets),
+    );
+    hydrated.addAll(results);
     // Only remove inline secrets after every profile has been migrated.
     await _persistSavedServers(hydrated);
     return hydrated;
