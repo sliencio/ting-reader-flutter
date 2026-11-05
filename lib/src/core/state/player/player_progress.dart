@@ -64,8 +64,8 @@ class _PlayerProgress {
 
   bool get _blocked => _disposed || appState.offlineMode || suspended();
 
-  Future<void> send() async {
-    final value = snapshot();
+  Future<void> send([_ProgressSnapshot? value]) async {
+    value ??= snapshot();
     if (value == null) return;
     await record(value);
     if (_blocked) return;
@@ -95,7 +95,11 @@ class _PlayerProgress {
   Future<void> _sendHttp(_ProgressSnapshot value) async {
     if (_blocked) return;
     try {
+      final alreadySyncing = journal.syncing;
       await journal.flush();
+      if (alreadySyncing && !_blocked && journal.hasPending(value.book.id)) {
+        await journal.flush();
+      }
     } catch (_) {
       // Background progress synchronization must not interrupt listening.
     }
@@ -104,7 +108,10 @@ class _PlayerProgress {
   Future<bool> _sendWebSocket(_ProgressSnapshot value) async {
     if (kIsWeb || _blocked || (appState.token?.isEmpty ?? true)) return false;
     if (journal.conflicts.containsKey(value.book.id)) return false;
-    if (journal.syncing) return false;
+    if (journal.syncing ||
+        !journal.canSendRealtime(value.book.id, value.chapter.id)) {
+      return false;
+    }
     final owner = journal.identity();
     final revision = appState.api.authRevision;
     try {
@@ -119,6 +126,7 @@ class _PlayerProgress {
       if (journal.versioned(value.book.id)) return false;
       if (_blocked ||
           journal.syncing ||
+          !journal.canSendRealtime(value.book.id, value.chapter.id) ||
           owner != journal.identity() ||
           revision != appState.api.authRevision) {
         return false;
@@ -128,6 +136,7 @@ class _PlayerProgress {
         'book_id': value.book.id,
         'chapter_id': value.chapter.id,
         'position': value.position.floor(),
+        'device_id': journal.deviceId,
       }));
       return true;
     } catch (error) {

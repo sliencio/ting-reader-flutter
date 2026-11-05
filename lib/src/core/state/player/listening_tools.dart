@@ -51,10 +51,12 @@ extension ListeningTools on PlayerState {
     }
     final owner = _currentResumeIdentity;
     if (_resumeIdentity != owner) return;
+    if (_sleepUnplayedChapterId == chapter.id) _sleepUnplayedChapterId = null;
     final key = (owner: owner, book: book.id, chapter: chapter.id);
     if (_lastRecordedChapterStart == key) return;
     _lastRecordedChapterStart = key;
     _checkpointInBackground('chapter_start');
+    unawaited(_progress.send());
   }
 
   Future<void> restoreCheckpoint(PlaybackCheckpoint checkpoint) async {

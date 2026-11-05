@@ -83,12 +83,14 @@ class _Api extends ApiClient {
   }
 }
 
-PendingListeningProgress _pending(double position) => PendingListeningProgress(
-    bookId: 'book',
-    chapterId: 'chapter',
-    position: position,
-    duration: 100,
-    updatedAt: DateTime.utc(2026, 10, 30));
+PendingListeningProgress _pending(double position,
+        {String chapter = 'chapter', DateTime? at}) =>
+    PendingListeningProgress(
+        bookId: 'book',
+        chapterId: chapter,
+        position: position,
+        duration: 100,
+        updatedAt: at ?? DateTime.utc(2026, 10, 30));
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -176,6 +178,32 @@ void main() {
     expect(sync.conflicts, isEmpty);
     expect(sync.pendingCount, 0);
     expect(api.writes.last['base_revision'], 2);
+  });
+
+  test('同一本书的离线章节在重启后依次上传，最后一章成为续播位置', () async {
+    final api = _Api();
+    var online = false;
+    ListeningProgressSync create() => ListeningProgressSync(
+        api: api, identity: () => 'owner', canSync: () => online);
+    final first = create();
+    final start = DateTime.now();
+    await first.record(_pending(20, at: start));
+    await first.record(_pending(30,
+        chapter: 'second', at: start.add(const Duration(seconds: 1))));
+    await first.record(_pending(40,
+        chapter: 'third', at: start.add(const Duration(seconds: 2))));
+    first.dispose();
+    final second = create();
+    addTearDown(second.dispose);
+    await second.initialize();
+    expect(second.pendingCount, 1);
+    online = true;
+    await second.flush();
+    expect(api.writes.map((item) => item['chapter_id']),
+        ['chapter', 'second', 'third']);
+    expect(api.writes.map((item) => item['base_revision']), [1, 2, 3]);
+    expect(api.remote['chapter_id'], 'third');
+    expect(second.pendingCount, 0);
   });
   for (final adopted in [false, true]) {
     test('远端通知只有实际采用位置后才推进本机基线（$adopted）', () async {

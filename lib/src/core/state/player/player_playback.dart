@@ -15,17 +15,19 @@ extension _PlayerPlayback on PlayerState {
   }
 
   /// 队列模式下集数用完时确定性停止底层音频。
-  Future<void> _pauseForEpisodeSleep() async {
+  Future<void> _pauseForEpisodeSleep(_ProgressSnapshot? lastPlayed) async {
     _cancelFocusRecovery(clearResume: true);
     // Android/Windows 在队列切集时可能先上报 playing=false，导致 pause()
     // 短路而未通知原生播放器。stop() 始终停掉平台播放器，同时保留音源状态。
     _stoppingForEpisodeSleep = true;
+    final sync =
+        lastPlayed == null ? Future<void>.value() : _progress.send(lastPlayed);
     try {
       await _audio.stop();
     } finally {
       _stoppingForEpisodeSleep = false;
     }
-    await sendProgress();
+    await Future.wait([_saveResumeRecord(), sync]);
   }
 
   Future<void> _playChapter(
@@ -39,6 +41,7 @@ extension _PlayerPlayback on PlayerState {
         _sleep.episodes == 1 && _resumeIdentity == _currentResumeIdentity
             ? _listeningSnapshot(compact: true)
             : null;
+    final lastPlayed = sleepEnd == null ? null : _progressSnapshot();
     final playGeneration = ++_playGeneration;
     _connectingPlayback = true;
     _selectionPending = false;
@@ -96,9 +99,11 @@ extension _PlayerPlayback on PlayerState {
     // 按集数睡眠：集数用完则阻止后续 _playWithSession 起播，并暂停旧音频。
     if (_checkEpisodeSleepOnChapterChange()) {
       _suppressAutoPlay = true;
+      _sleepUnplayedChapterId = targetChapter.id;
       if (sleepEnd != null) {
         _checkpointInBackground('sleep_end', snapshot: sleepEnd);
       }
+      if (lastPlayed != null) unawaited(_progress.send(lastPlayed));
     }
     _notifyIfActive();
     _updateListeningCache();
@@ -525,6 +530,7 @@ extension _PlayerPlayback on PlayerState {
     if (currentChapter?.id == nextChapter.id) return;
     final sleepEnd =
         _sleep.episodes == 1 ? _listeningSnapshot(compact: true) : null;
+    final lastPlayed = sleepEnd == null ? null : _progressSnapshot();
     final book = currentBook;
     final outro = book?.skipOutro ?? 0;
     if (previousIndex >= 0 &&
@@ -554,10 +560,11 @@ extension _PlayerPlayback on PlayerState {
     // 按集数睡眠：队列模式下集数用完则直接暂停音频。
     final shouldStopForSleep = _checkEpisodeSleepOnChapterChange();
     if (shouldStopForSleep) {
+      _sleepUnplayedChapterId = nextChapter.id;
       if (sleepEnd != null) {
         _checkpointInBackground('sleep_end', snapshot: sleepEnd);
       }
-      unawaited(_pauseForEpisodeSleep());
+      unawaited(_pauseForEpisodeSleep(lastPlayed));
       _notifyIfActive();
       return;
     }

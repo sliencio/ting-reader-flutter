@@ -43,13 +43,15 @@ class PendingListeningProgress {
               DateTime.tryParse(json['unsynced_since']?.toString() ?? ''));
 }
 
+typedef _PendingChapters = Map<String, PendingListeningProgress>;
+
 class ListeningProgressSync extends ChangeNotifier {
   ListeningProgressSync(
       {required this.api, required this.identity, required this.canSync});
   final ApiClient api;
   final String Function() identity;
   final bool Function() canSync;
-  final Map<String, Map<String, PendingListeningProgress>> _pending = {};
+  final Map<String, Map<String, _PendingChapters>> _pending = {};
   final Map<String, Map<String, ProgressItem>> _acknowledged = {};
   final Map<String, Map<String, ProgressItem>> _conflicts = {};
   Future<void> _writes = Future<void>.value();
@@ -60,11 +62,30 @@ class ListeningProgressSync extends ChangeNotifier {
   bool versioned(String book) =>
       _acknowledged[identity()]?[book]?.revision != null;
   bool get syncing => _flushing != null;
+  String? get deviceId => _deviceId;
   int get pendingCount => _pending[identity()]?.length ?? 0;
   Map<String, ProgressItem> get conflicts =>
       Map.unmodifiable(_conflicts[identity()] ?? {});
   bool hasPending(String bookId) =>
       _pending[identity()]?.containsKey(bookId) ?? false;
+  bool canSendRealtime(String bookId, String chapterId) {
+    final chapters = _pending[identity()]?[bookId];
+    return chapters != null &&
+        chapters.length == 1 &&
+        chapters.containsKey(chapterId);
+  }
+
+  PendingListeningProgress? _latestPending(String owner, String bookId) =>
+      _pending[owner]?[bookId]?.values.lastOrNull;
+
+  void _removePending(String owner, PendingListeningProgress value) {
+    final books = _pending[owner]!;
+    final chapters = books[value.bookId];
+    if (!identical(chapters?[value.chapterId], value)) return;
+    chapters!.remove(value.chapterId);
+    if (chapters.isEmpty) books.remove(value.bookId);
+  }
+
   String _key(String owner) =>
       'listening_progress:${base64Url.encode(utf8.encode(owner))}';
 
@@ -81,7 +102,7 @@ class ListeningProgressSync extends ChangeNotifier {
           .encode(List.generate(24, (_) => Random.secure().nextInt(256)));
       await prefs.setString('listening_device_id', _deviceId!);
     }
-    final items = <String, PendingListeningProgress>{};
+    final items = <String, _PendingChapters>{};
     final ack = <String, ProgressItem>{};
     try {
       final json = asMap(jsonDecode(prefs.getString(_key(owner)) ?? '{}'));
@@ -91,7 +112,7 @@ class ListeningProgressSync extends ChangeNotifier {
             item.duration.isFinite &&
             item.bookId.isNotEmpty &&
             item.chapterId.isNotEmpty) {
-          items[item.bookId] = item;
+          items.putIfAbsent(item.bookId, () => {})[item.chapterId] = item;
         }
       }
       for (final value in asMapList(json['acknowledged'])) {
@@ -111,8 +132,11 @@ class ListeningProgressSync extends ChangeNotifier {
     await prefs.setString(
         _key(owner),
         jsonEncode({
-          'pending':
-              _pending[owner]!.values.map((item) => item.toJson()).toList(),
+          'pending': _pending[owner]!
+              .values
+              .expand((chapters) => chapters.values)
+              .map((item) => item.toJson())
+              .toList(),
           'acknowledged': _acknowledged[owner]!
               .values
               .map((item) => {
@@ -151,14 +175,15 @@ class ListeningProgressSync extends ChangeNotifier {
           remote.revision! < acknowledged!.revision!) {
         return;
       }
-      final pending = _pending[owner]![remote.bookId];
+      final chapters = _pending[owner]![remote.bookId];
+      final pending = chapters?.values.lastOrNull;
+      final first = chapters?.values.firstOrNull;
+      final matchesFirst = first != null &&
+          remote.chapterId == first.chapterId &&
+          (remote.position - first.position).abs() < 1;
       if (data['device_id'] == _deviceId) {
         _acknowledged[owner]![remote.bookId] = remote;
-        if (pending != null &&
-            remote.chapterId == pending.chapterId &&
-            (remote.position - pending.position).abs() < 1) {
-          _pending[owner]!.remove(remote.bookId);
-        }
+        if (matchesFirst) _removePending(owner, first);
         await _persist(owner);
         _notify();
         return;
@@ -169,14 +194,11 @@ class ListeningProgressSync extends ChangeNotifier {
         _notify();
         return;
       }
-      if (pending != null &&
-          remote.chapterId == pending.chapterId &&
-          (remote.position - pending.position).abs() < 1) {
+      if (matchesFirst) {
         _acknowledged[owner]![remote.bookId] = remote;
-        _pending[owner]!.remove(remote.bookId);
+        _removePending(owner, first);
         await _persist(owner);
         _notify();
-        applyRemote?.call();
       } else if (pending == null && (applyRemote?.call() ?? false)) {
         _acknowledged[owner]![remote.bookId] = remote;
         await _persist(owner);
@@ -191,7 +213,7 @@ class ListeningProgressSync extends ChangeNotifier {
     try {
       final remote = await _remote(bookId);
       if (_disposed || identity() != owner || !canSync()) return false;
-      final pending = _pending[owner]![bookId];
+      final pending = _latestPending(owner, bookId);
       if (pending != null &&
           remote != null &&
           _remoteConflicts(owner, pending, remote)) {
@@ -215,11 +237,14 @@ class ListeningProgressSync extends ChangeNotifier {
     final owner = identity();
     return _serialize(() async {
       await _load(owner);
-      final previous = _pending[owner]![value.bookId];
-      if (previous != null && previous.updatedAt.isAfter(value.updatedAt)) {
+      final chapters = _pending[owner]!.putIfAbsent(value.bookId, () => {});
+      final latest = chapters.values.lastOrNull;
+      if (latest != null && latest.updatedAt.isAfter(value.updatedAt)) {
         return;
       }
-      _pending[owner]![value.bookId] = PendingListeningProgress(
+      final previous = chapters.values.firstOrNull;
+      chapters.remove(value.chapterId);
+      chapters[value.chapterId] = PendingListeningProgress(
           bookId: value.bookId,
           chapterId: value.chapterId,
           position: value.position,
@@ -296,28 +321,45 @@ class ListeningProgressSync extends ChangeNotifier {
         canSync();
     await initialize();
     if (!active()) return;
-    final entries = _pending[owner]!.values.toList()
-      ..sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
-    for (final value in entries) {
+    final entries = _pending[owner]!
+        .values
+        .expand((chapters) => chapters.values)
+        .indexed
+        .toList()
+      ..sort((a, b) {
+        final order = a.$2.updatedAt.compareTo(b.$2.updatedAt);
+        return order == 0 ? a.$1.compareTo(b.$1) : order;
+      });
+    for (final (_, value) in entries) {
       if (!active()) return;
       if (_conflicts[owner]?.containsKey(value.bookId) ?? false) continue;
+      if (!identical(
+          _pending[owner]![value.bookId]?.values.firstOrNull, value)) {
+        continue;
+      }
       try {
         final remote = await _remote(value.bookId);
         if (!active()) return;
-        if (remote != null && _remoteConflicts(owner, value, remote)) {
+        final latest = _latestPending(owner, value.bookId);
+        if (remote != null &&
+            latest != null &&
+            _remoteConflicts(owner, latest, remote)) {
           _conflicts.putIfAbsent(owner, () => {})[value.bookId] = remote;
           _notify();
           continue;
         }
         // 每次请求前再次核对账号和待上传快照，切服或新进度不能串到旧请求里。
-        if (!identical(_pending[owner]![value.bookId], value)) continue;
+        if (!identical(
+            _pending[owner]![value.bookId]?.values.firstOrNull, value)) {
+          continue;
+        }
         final response = await api.post('/api/progress', data: {
           'book_id': value.bookId,
           'chapter_id': value.chapterId,
           'position': value.position,
           'duration': value.duration,
           if (remote?.revision != null) 'base_revision': remote!.revision,
-          if (remote?.revision != null) 'device_id': _deviceId,
+          'device_id': _deviceId,
         });
         if (!active()) return;
         final ackData = asMap(response.data);
@@ -325,9 +367,7 @@ class ListeningProgressSync extends ChangeNotifier {
             ackData['book_id'] != null ? ackData : value.toJson());
         await _serialize(() async {
           _acknowledged[owner]![value.bookId] = accepted;
-          if (identical(_pending[owner]![value.bookId], value)) {
-            _pending[owner]!.remove(value.bookId);
-          }
+          _removePending(owner, value);
           await _persist(owner);
         });
         error = null;
@@ -374,10 +414,10 @@ class ListeningProgressSync extends ChangeNotifier {
     // 明确选择本机后，以刚读取的远端版本为基线；并发更新仍由服务端拒绝。
     await _serialize(() async {
       await _load(owner);
-      final current = _pending[owner]![bookId];
+      final current = _latestPending(owner, bookId);
       if (latest != null) _acknowledged[owner]![bookId] = latest;
       if (current != null) {
-        _pending[owner]![bookId] = PendingListeningProgress(
+        _pending[owner]![bookId]![current.chapterId] = PendingListeningProgress(
             bookId: current.bookId,
             chapterId: current.chapterId,
             position: current.position,

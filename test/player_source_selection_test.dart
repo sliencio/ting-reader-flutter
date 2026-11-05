@@ -671,7 +671,16 @@ void main() {
     final first = chapter('/data/first.mp3', id: 'first');
     final second = chapter('/data/second.mp3', id: 'second', index: 1);
     final third = chapter('/data/third.mp3', id: 'third', index: 2);
+    final gate = Completer<void>();
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+    });
+    app
+      ..offlineMode = false
+      ..token = null;
+    app.api.progressGate = gate.future;
     await player.playChapter(book, [first, second, third], first);
+    await waitForPlayback(() => app.api.progressUpdates.isNotEmpty);
     player.startEpisodeSleepTimer(2);
 
     native.emit(index: 1);
@@ -695,6 +704,21 @@ void main() {
         ]));
     expect((await player.playbackCheckpoints()).map((entry) => entry.reason),
         ['sleep']);
+
+    gate.complete();
+    await waitForPlayback(() =>
+        !player.progressSync.syncing && player.progressSync.pendingCount == 0);
+    expect(
+        app.api.progressUpdates
+            .map((data) => (data as Map)['chapter_id'])
+            .toSet(),
+        {first.id, second.id});
+
+    await player.togglePlay();
+    await waitForPlayback(() => player.isPlaying);
+    native.emit(index: 2);
+    await waitForPlayback(() => app.api.progressUpdates
+        .any((data) => (data as Map)['chapter_id'] == third.id));
   });
 
   test('回归_分钟睡眠到期记录当前章节的时间点', () async {
@@ -1763,7 +1787,7 @@ void main() {
     });
   }
 
-  test('HTTP 进度同步仅发送续播需要的字段', () async {
+  test('HTTP 进度同步发送续播字段和本机标识', () async {
     app
       ..offlineMode = false
       ..token = null;
@@ -1782,6 +1806,7 @@ void main() {
         'chapter_id': item.id,
         'position': 23.5,
         'duration': 636,
+        'device_id': isNotEmpty,
       }
     ]);
   });

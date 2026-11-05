@@ -126,20 +126,11 @@ extension _PlayerResume on PlayerState {
     final identity = _resumeIdentity ?? _currentResumeIdentity;
     if (identity != _currentResumeIdentity) return;
     final position = currentTime;
-    final durationSnapshot = duration;
-    await _resumeStore.write(
+    final pending = includePending ? null : _progressSnapshot();
+    final local = _resumeStore.write(
         identity,
         PlaybackResumeRecord(
             book, List.of(chapters), chapter.id, position, DateTime.now()));
-    if (!includePending) {
-      if (identity == _currentResumeIdentity) {
-        await _progress.record((
-          book: book,
-          chapter: chapter,
-          position: position,
-          duration: durationSnapshot
-        ));
-      }
-    }
+    await Future.wait([local, if (pending != null) _progress.record(pending)]);
   }
 }

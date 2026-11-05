@@ -167,18 +167,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _focusPause = Future<void>.value();
   late final _PlayerProgress _progress = _PlayerProgress(
     appState: appState,
-    snapshot: () {
-      final book = currentBook;
-      final chapter = currentChapter;
-      return book == null || chapter == null
-          ? null
-          : (
-              book: book,
-              chapter: chapter,
-              position: currentTime,
-              duration: duration,
-            );
-    },
+    snapshot: _progressSnapshot,
     suspended: () =>
         _gatewayReauthenticationPending || downloadState.network.offline,
     needsHttpFallback: () => _usesGatewaySingleChapterPlayback,
@@ -269,6 +258,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   // 并在 _playWithSession 中暂停仍在播放的旧音频。
   bool _suppressAutoPlay = false;
   bool _stoppingForEpisodeSleep = false;
+  String? _sleepUnplayedChapterId;
   ({String owner, String book, String chapter})? _lastRecordedChapterStart;
   // 按集数睡眠：剩余可播集数（含当前集）。章节切换时递减，归零即暂停。
   late final PlaybackSleep _sleep = PlaybackSleep(
@@ -522,6 +512,26 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     final local = _saveResumeRecord();
     final remote = _selectionPending ? Future<void>.value() : _progress.send();
     await Future.wait([local, remote]);
+  }
+
+  _ProgressSnapshot? _progressSnapshot() {
+    final book = currentBook;
+    final chapter = currentChapter;
+    if (book == null ||
+        chapter == null ||
+        _selectionPending ||
+        _connectingPlayback ||
+        chapter.id == _sleepUnplayedChapterId ||
+        (_resumeIdentity != null &&
+            _resumeIdentity != _currentResumeIdentity)) {
+      return null;
+    }
+    return (
+      book: book,
+      chapter: chapter,
+      position: currentTime,
+      duration: duration
+    );
   }
 
   void _closeProgressSocket() => _progress.closeSocket();
