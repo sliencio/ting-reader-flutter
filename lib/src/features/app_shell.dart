@@ -28,6 +28,7 @@ import '../core/plugin_extensions/types.dart';
 import '../core/utils/locale.dart';
 import '../shared/app_scope.dart';
 import '../shared/common/common_widgets.dart';
+import '../shared/common/scroll_to_top_button.dart';
 import '../shared/plugin_extensions/plugin_extension_host.dart';
 import 'player/mini_player.dart';
 import 'settings_push_layout.dart';
@@ -389,7 +390,12 @@ class _AppShellState extends State<AppShell> {
                                   ),
                                 const SizedBox(width: 8),
                               ]),
-                              Expanded(child: _page()),
+                              Expanded(
+                                child: ScrollToTopButton(
+                                  bottom: showMiniPlayer ? 104 : 20,
+                                  child: _page(),
+                                ),
+                              ),
                             ]),
                           ),
                         ),
@@ -459,7 +465,12 @@ class _AppShellState extends State<AppShell> {
                           children: [
                             if (_compactBackButton(appState) case final back?)
                               back,
-                            Expanded(child: _page()),
+                            Expanded(
+                              child: ScrollToTopButton(
+                                bottom: showMiniPlayer ? 104 : 20,
+                                child: _page(),
+                              ),
+                            ),
                           ],
                         ),
                       ),

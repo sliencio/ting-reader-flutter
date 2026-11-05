@@ -284,6 +284,69 @@ class _BookshelfPageState extends State<BookshelfPage> {
     );
   }
 
+  /// 标题、搜索与筛选固定在顶部，不随书单一起滚走。
+  Widget _buildShelfHeader() {
+    final appState = AppScope.appOf(context);
+    return _Header(
+      selectionMode: _selectionMode,
+      selectedBookCount: _selectedBookIds.length,
+      selectedSeriesCount: _selectedSeriesIds.length,
+      libraries: _libraries,
+      selectedLibraryId: _selectedLibraryId,
+      showFilterMenu: _showFilterMenu,
+      filterMenuLink: _filterMenuLink,
+      deletingItems: _deletingBooks || _deletingSeries,
+      updatingReadStatus: _updatingReadStatus,
+      onSearchOpen: widget.openSearch,
+      onLibraryChanged: (value) async {
+        setState(() {
+          _selectedLibraryId = value ?? '';
+          _showFilterMenu = false;
+        });
+        _closeFilterMenu();
+        await _persist('bookshelf_library_id', _selectedLibraryId);
+        await _load();
+      },
+      onToggleFilterMenu: _toggleFilterMenu,
+      onSelectionMode: () {
+        _closeFilterMenu();
+        setState(() {
+          _selectionMode = true;
+          _selectedBookIds.clear();
+          _selectedSeriesIds.clear();
+        });
+      },
+      onCancelSelection: () {
+        setState(() {
+          _selectionMode = false;
+          _selectedBookIds.clear();
+          _selectedSeriesIds.clear();
+        });
+      },
+      onSelectAll: _selectAllVisible,
+      onCreateSeries: !appState.isAdmin ||
+              _selectedBookIds.isEmpty ||
+              _selectedSeriesIds.isNotEmpty ||
+              _deletingBooks ||
+              _deletingSeries
+          ? null
+          : _showCreateSeriesDialog,
+      onDeleteSelected: !appState.isAdmin ||
+              (_selectedBookIds.isEmpty && _selectedSeriesIds.isEmpty) ||
+              _deletingBooks ||
+              _deletingSeries
+          ? null
+          : _showDeleteSelectedDialog,
+      onMarkRead: _selectedBookIds.isNotEmpty && !_updatingReadStatus
+          ? () => _markSelectedRead(true)
+          : null,
+      onMarkUnread: _selectedBookIds.isNotEmpty && !_updatingReadStatus
+          ? () => _markSelectedRead(false)
+          : null,
+      onTitleTap: _scrollToTop,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final activeLetterValue = _activeLetter;
@@ -291,7 +354,6 @@ class _BookshelfPageState extends State<BookshelfPage> {
     if (_shelf?.error != null && !(_shelf?.hasSnapshot ?? false)) {
       return LoadErrorView(onRetry: _load);
     }
-    final appState = AppScope.appOf(context);
     final hasContent = _books.isNotEmpty || _series.isNotEmpty;
     final grouped = _groupedContent;
     final hasFilteredContent =
@@ -300,6 +362,7 @@ class _BookshelfPageState extends State<BookshelfPage> {
     final list = PageListView(
       controller: _scrollController,
       onRefresh: _load,
+      header: _buildShelfHeader(),
       children: [
         if (_shelf?.error != null)
           ListTile(
@@ -309,64 +372,6 @@ class _BookshelfPageState extends State<BookshelfPage> {
             trailing: const Icon(Icons.refresh),
             onTap: _load,
           ),
-        _Header(
-          selectionMode: _selectionMode,
-          selectedBookCount: _selectedBookIds.length,
-          selectedSeriesCount: _selectedSeriesIds.length,
-          libraries: _libraries,
-          selectedLibraryId: _selectedLibraryId,
-          showFilterMenu: _showFilterMenu,
-          filterMenuLink: _filterMenuLink,
-          deletingItems: _deletingBooks || _deletingSeries,
-          updatingReadStatus: _updatingReadStatus,
-          onSearchOpen: widget.openSearch,
-          onLibraryChanged: (value) async {
-            setState(() {
-              _selectedLibraryId = value ?? '';
-              _showFilterMenu = false;
-            });
-            _closeFilterMenu();
-            await _persist('bookshelf_library_id', _selectedLibraryId);
-            await _load();
-          },
-          onToggleFilterMenu: _toggleFilterMenu,
-          onSelectionMode: () {
-            _closeFilterMenu();
-            setState(() {
-              _selectionMode = true;
-              _selectedBookIds.clear();
-              _selectedSeriesIds.clear();
-            });
-          },
-          onCancelSelection: () {
-            setState(() {
-              _selectionMode = false;
-              _selectedBookIds.clear();
-              _selectedSeriesIds.clear();
-            });
-          },
-          onSelectAll: _selectAllVisible,
-          onCreateSeries: !appState.isAdmin ||
-                  _selectedBookIds.isEmpty ||
-                  _selectedSeriesIds.isNotEmpty ||
-                  _deletingBooks ||
-                  _deletingSeries
-              ? null
-              : _showCreateSeriesDialog,
-          onDeleteSelected: !appState.isAdmin ||
-                  (_selectedBookIds.isEmpty && _selectedSeriesIds.isEmpty) ||
-                  _deletingBooks ||
-                  _deletingSeries
-              ? null
-              : _showDeleteSelectedDialog,
-          onMarkRead: _selectedBookIds.isNotEmpty && !_updatingReadStatus
-              ? () => _markSelectedRead(true)
-              : null,
-          onMarkUnread: _selectedBookIds.isNotEmpty && !_updatingReadStatus
-              ? () => _markSelectedRead(false)
-              : null,
-          onTitleTap: _scrollToTop,
-        ),
         const SizedBox(height: 10),
         if (!hasContent)
           EmptyState(

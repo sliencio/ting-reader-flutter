@@ -309,28 +309,55 @@ class PageListView extends StatelessWidget {
     required this.children,
     this.onRefresh,
     this.controller,
+    this.header,
   });
 
   final List<Widget> children;
   final Future<void> Function()? onRefresh;
   final ScrollController? controller;
 
+  /// 固定在顶部、不随列表滚走的区域。
+  final Widget? header;
+
   @override
   Widget build(BuildContext context) {
     final onRefreshValue = onRefresh;
+    final headerValue = header;
     return LayoutBuilder(
       builder: (context, constraints) {
+        final padding = pagePaddingForWidth(constraints.maxWidth);
         final list = ListView(
           controller: controller,
-          padding: pagePaddingForWidth(constraints.maxWidth),
+          // 有固定页头时列表顶部不再留白，避免标题下方凭空多出一条间隙。
+          padding: headerValue == null
+              ? padding
+              : EdgeInsets.fromLTRB(
+                  padding.left, 0, padding.right, padding.bottom),
           children: children,
         );
 
-        if (onRefreshValue == null) return list;
-        return RefreshIndicator(
-          color: AppColors.primary600,
-          onRefresh: onRefreshValue,
-          child: list,
+        final scroller = onRefreshValue == null
+            ? list
+            : RefreshIndicator(
+                color: AppColors.primary600,
+                onRefresh: onRefreshValue,
+                child: list,
+              );
+
+        if (headerValue == null) return scroller;
+        return Column(
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                padding.left,
+                padding.top,
+                padding.right,
+                padding.bottom / 2,
+              ),
+              child: headerValue,
+            ),
+            Expanded(child: scroller),
+          ],
         );
       },
     );
