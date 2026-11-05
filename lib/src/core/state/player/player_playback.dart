@@ -8,12 +8,23 @@ extension _PlayerPlayback on PlayerState {
   bool _checkEpisodeSleepOnChapterChange() =>
       _sleep.chapterChanged(currentChapter?.id);
 
+  void _finishEpisodeSleepAtBookEnd() {
+    if (_sleep.episodes != 1) return;
+    _checkpointInBackground('sleep_end');
+    _sleep.cancel();
+  }
+
   /// 队列模式下集数用完时确定性停止底层音频。
   Future<void> _pauseForEpisodeSleep() async {
     _cancelFocusRecovery(clearResume: true);
     // Android/Windows 在队列切集时可能先上报 playing=false，导致 pause()
     // 短路而未通知原生播放器。stop() 始终停掉平台播放器，同时保留音源状态。
-    await _audio.stop();
+    _stoppingForEpisodeSleep = true;
+    try {
+      await _audio.stop();
+    } finally {
+      _stoppingForEpisodeSleep = false;
+    }
     await sendProgress();
   }
 
@@ -24,6 +35,10 @@ extension _PlayerPlayback on PlayerState {
     double? startAt,
     bool autoPlay = true,
   }) async {
+    final sleepEnd =
+        _sleep.episodes == 1 && _resumeIdentity == _currentResumeIdentity
+            ? _listeningSnapshot(compact: true)
+            : null;
     final playGeneration = ++_playGeneration;
     _connectingPlayback = true;
     _selectionPending = false;
@@ -81,6 +96,9 @@ extension _PlayerPlayback on PlayerState {
     // 按集数睡眠：集数用完则阻止后续 _playWithSession 起播，并暂停旧音频。
     if (_checkEpisodeSleepOnChapterChange()) {
       _suppressAutoPlay = true;
+      if (sleepEnd != null) {
+        _checkpointInBackground('sleep_end', snapshot: sleepEnd);
+      }
     }
     _notifyIfActive();
     _updateListeningCache();
@@ -199,6 +217,7 @@ extension _PlayerPlayback on PlayerState {
     } finally {
       if (_isActivePlay(playGeneration, targetChapter.id)) {
         _connectingPlayback = false;
+        _recordChapterStartIfPlaying();
         _notifyIfActive();
       }
     }
@@ -404,6 +423,10 @@ extension _PlayerPlayback on PlayerState {
     if (index >= 0 && index < chapters.length - 1) {
       await playChapter(book, chapters, chapters[index + 1]);
     } else {
+      if (fromOutro ||
+          _audio.processingState == audio.ProcessingState.completed) {
+        _finishEpisodeSleepAtBookEnd();
+      }
       await _audio.pause();
       await sendProgress();
     }
@@ -500,6 +523,8 @@ extension _PlayerPlayback on PlayerState {
     }
     final nextChapter = chapters[index];
     if (currentChapter?.id == nextChapter.id) return;
+    final sleepEnd =
+        _sleep.episodes == 1 ? _listeningSnapshot(compact: true) : null;
     final book = currentBook;
     final outro = book?.skipOutro ?? 0;
     if (previousIndex >= 0 &&
@@ -528,11 +553,15 @@ extension _PlayerPlayback on PlayerState {
     _updateListeningCache();
     // 按集数睡眠：队列模式下集数用完则直接暂停音频。
     final shouldStopForSleep = _checkEpisodeSleepOnChapterChange();
-    _notifyIfActive();
     if (shouldStopForSleep) {
+      if (sleepEnd != null) {
+        _checkpointInBackground('sleep_end', snapshot: sleepEnd);
+      }
       unawaited(_pauseForEpisodeSleep());
+      _notifyIfActive();
       return;
     }
+    _notifyIfActive();
     if (!usingLocalFile &&
         downloadState.hasChapter(nextChapter.id) &&
         book != null) {
@@ -566,6 +595,7 @@ extension _PlayerPlayback on PlayerState {
       });
     }
     _startProgressTimer();
+    _recordChapterStartIfPlaying();
   }
 
   void _handleSkipOutro() {

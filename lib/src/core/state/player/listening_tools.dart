@@ -1,19 +1,23 @@
 part of '../player_state.dart';
 
 extension ListeningTools on PlayerState {
-  PlaybackResumeRecord? _listeningSnapshot() {
+  PlaybackResumeRecord? _listeningSnapshot({bool compact = false}) {
     final book = currentBook;
     final chapter = currentChapter;
     if (book == null || chapter == null || !currentTime.isFinite) return null;
-    return PlaybackResumeRecord(
-        book, List.of(chapters), chapter.id, currentTime, DateTime.now());
+    return PlaybackResumeRecord(book, compact ? [chapter] : List.of(chapters),
+        chapter.id, currentTime, DateTime.now());
   }
 
-  void _checkpointInBackground(String reason) {
-    final record = _listeningSnapshot();
+  void _checkpointInBackground(String reason,
+      {PlaybackResumeRecord? snapshot}) {
+    final owner = _currentResumeIdentity;
+    final timeline = PlaybackCheckpoint.isTimelineReason(reason);
+    if (timeline && _resumeIdentity != owner) return;
+    final record = snapshot ?? _listeningSnapshot(compact: timeline);
     if (record == null || _disposed) return;
     unawaited(_checkpoints
-        .add(_currentResumeIdentity, PlaybackCheckpoint(record, reason))
+        .add(owner, PlaybackCheckpoint(record, reason))
         .catchError((Object failure) {
       debugPrint('保存进度保护点失败：$failure');
     }));
@@ -21,6 +25,37 @@ extension ListeningTools on PlayerState {
 
   Future<List<PlaybackCheckpoint>> playbackCheckpoints() =>
       _checkpoints.read(_currentResumeIdentity);
+
+  Future<List<PlaybackCheckpoint>> playbackTimeline() async {
+    final owner = _currentResumeIdentity;
+    final entries = await _checkpoints.readTimeline(owner);
+    return owner == _currentResumeIdentity ? entries : [];
+  }
+
+  void _recordChapterStartIfPlaying() {
+    final book = currentBook;
+    final chapter = currentChapter;
+    if (book == null ||
+        chapter == null ||
+        _disposed ||
+        _connectingPlayback ||
+        _selectionPending ||
+        _suppressPositionUpdates ||
+        _applyingQueueStartSeek ||
+        _stoppingForEpisodeSleep ||
+        _gatewayReauthenticationPending ||
+        !_audio.playing ||
+        _audio.processingState != audio.ProcessingState.ready ||
+        error != null) {
+      return;
+    }
+    final owner = _currentResumeIdentity;
+    if (_resumeIdentity != owner) return;
+    final key = (owner: owner, book: book.id, chapter: chapter.id);
+    if (_lastRecordedChapterStart == key) return;
+    _lastRecordedChapterStart = key;
+    _checkpointInBackground('chapter_start');
+  }
 
   Future<void> restoreCheckpoint(PlaybackCheckpoint checkpoint) async {
     final record = checkpoint.record;

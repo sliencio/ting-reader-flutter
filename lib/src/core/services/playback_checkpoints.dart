@@ -9,6 +9,8 @@ class PlaybackCheckpoint {
   const PlaybackCheckpoint(this.record, this.reason);
   final PlaybackResumeRecord record;
   final String reason;
+  static bool isTimelineReason(String reason) =>
+      reason == 'chapter_start' || reason == 'sleep_end';
   Map<String, dynamic> toJson() =>
       {'record': record.toJson(), 'reason': reason};
   factory PlaybackCheckpoint.fromJson(Map<String, dynamic> json) =>
@@ -18,18 +20,28 @@ class PlaybackCheckpoint {
 
 class PlaybackCheckpoints {
   Future<void> _writes = Future<void>.value();
-  String _key(String identity) =>
-      'playback_checkpoints:${base64Url.encode(utf8.encode(identity))}';
+  String _key(String identity, {bool timeline = false}) =>
+      '${timeline ? 'playback_timeline' : 'playback_checkpoints'}:'
+      '${base64Url.encode(utf8.encode(identity))}';
 
   Future<List<PlaybackCheckpoint>> read(String identity) async {
     await _writes;
-    return _read(identity);
+    return _read(_key(identity));
   }
 
-  Future<List<PlaybackCheckpoint>> _read(String identity) async {
+  Future<List<PlaybackCheckpoint>> readTimeline(String identity) async {
+    await _writes;
+    final entries = [
+      ...await _read(_key(identity, timeline: true)),
+      ...(await _read(_key(identity))).where((item) => item.reason == 'sleep'),
+    ]..sort((a, b) => b.record.updatedAt.compareTo(a.record.updatedAt));
+    return entries.take(20).toList();
+  }
+
+  Future<List<PlaybackCheckpoint>> _read(String key) async {
     final prefs = await SharedPreferences.getInstance();
     try {
-      return asMapList(jsonDecode(prefs.getString(_key(identity)) ?? '[]'))
+      return asMapList(jsonDecode(prefs.getString(key) ?? '[]'))
           .map(PlaybackCheckpoint.fromJson)
           .where((item) =>
               item.record.chapter != null && item.record.position.isFinite)
@@ -40,9 +52,11 @@ class PlaybackCheckpoints {
   }
 
   Future<void> add(String identity, PlaybackCheckpoint value) {
+    final timeline = PlaybackCheckpoint.isTimelineReason(value.reason);
+    final key = _key(identity, timeline: timeline);
     final write = _writes.catchError((_) {}).then((_) async {
-      final entries = await _read(identity);
-      if (entries.isNotEmpty) {
+      final entries = await _read(key);
+      if (!timeline && value.reason != 'sleep' && entries.isNotEmpty) {
         final last = entries.first;
         if (last.reason == value.reason &&
             last.record.book.id == value.record.book.id &&
@@ -53,7 +67,7 @@ class PlaybackCheckpoints {
       }
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
-          _key(identity),
+          key,
           jsonEncode([value, ...entries]
               .take(20)
               .map((item) => item.toJson())

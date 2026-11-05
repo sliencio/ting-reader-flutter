@@ -64,6 +64,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
       if (currentTime > _furthestChapterPosition) {
         _furthestChapterPosition = currentTime;
       }
+      _recordChapterStartIfPlaying();
       _handleSkipOutro();
       if (DateTime.now().difference(_lastResumeSave).inSeconds >= 5) {
         _lastResumeSave = DateTime.now();
@@ -267,11 +268,14 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   // 睡眠定时按集数：集数用完时阻止 playChapter 的 _playWithSession 自动起播，
   // 并在 _playWithSession 中暂停仍在播放的旧音频。
   bool _suppressAutoPlay = false;
+  bool _stoppingForEpisodeSleep = false;
+  ({String owner, String book, String chapter})? _lastRecordedChapterStart;
   // 按集数睡眠：剩余可播集数（含当前集）。章节切换时递减，归零即暂停。
   late final PlaybackSleep _sleep = PlaybackSleep(
     isPlaying: () => isPlaying,
     onChanged: _notifyIfActive,
     onExpire: () async {
+      _checkpointInBackground('sleep_end');
       try {
         await pause();
       } catch (failure) {

@@ -146,6 +146,7 @@ extension _PlayerGateway on PlayerState {
         return;
       }
       _recordChapterFinished();
+      _finishEpisodeSleepAtBookEnd();
       await _audio.pause();
       await sendProgress();
       return;

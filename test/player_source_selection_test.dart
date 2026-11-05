@@ -667,6 +667,60 @@ void main() {
     player.cancelSleepTimer();
   });
 
+  test('回归_自动切章与按集数结束的时间点归属实际播放章节', () async {
+    final first = chapter('/data/first.mp3', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    final third = chapter('/data/third.mp3', id: 'third', index: 2);
+    await player.playChapter(book, [first, second, third], first);
+    player.startEpisodeSleepTimer(2);
+
+    native.emit(index: 1);
+    await waitForPlayback(() => player.currentChapter?.id == second.id);
+    native.emit(index: 2);
+    await waitForPlayback(
+        () => player.currentChapter?.id == third.id && !player.isPlaying);
+
+    final timeline = await player.playbackTimeline();
+    final events =
+        timeline.map((entry) => (entry.reason, entry.record.chapterId));
+    expect(events.take(2), [
+      ('sleep_end', second.id),
+      ('chapter_start', second.id),
+    ]);
+    expect(
+        events.skip(2),
+        unorderedEquals([
+          ('sleep', first.id),
+          ('chapter_start', first.id),
+        ]));
+    expect((await player.playbackCheckpoints()).map((entry) => entry.reason),
+        ['sleep']);
+  });
+
+  test('回归_分钟睡眠到期记录当前章节的时间点', () async {
+    final item = chapter('/data/first.mp3', id: 'first');
+    await player.playChapter(book, [item], item);
+    await waitForPlayback(() => player.isPlaying && !player.isLoading);
+    late void Function() tick;
+    final timerZone = Zone.current.fork(specification: ZoneSpecification(
+      createPeriodicTimer: (self, parent, zone, interval, callback) {
+        final timer = parent.createPeriodicTimer(zone, interval, callback);
+        tick = () => callback(timer);
+        return timer;
+      },
+    ));
+    timerZone.run(() => player.startSleepTimer(1));
+    for (var second = 0; second < 60; second++) {
+      tick();
+    }
+    await waitForPlayback(() => !player.isPlaying);
+
+    final timeline = await player.playbackTimeline();
+    expect(timeline.first.reason, 'sleep_end');
+    expect(timeline.first.record.chapterId, item.id);
+    expect(player.isPlaying, isFalse);
+  });
+
   test('播放后才缓存的下一章会在切章时改用本地文件', () async {
     native.holdPlayback = true;
     final first = chapter('/server/first.mp3', id: 'first');
@@ -1163,6 +1217,11 @@ void main() {
 
     expect(player.sleepEpisodesRemaining, isNull);
     expect(player.error, isNull);
+    final timeline = await player.playbackTimeline();
+    expect(timeline.first.reason, 'sleep_end');
+    expect(timeline.first.record.chapterId, first.id);
+    expect(
+        timeline.any((entry) => entry.record.chapterId == second.id), isFalse);
   });
 
   test('gateway WMA completion still verifies the session and advances',
