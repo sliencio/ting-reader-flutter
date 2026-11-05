@@ -19,8 +19,8 @@ Future<void> showListeningCheckpoints(
             height: MediaQuery.sizeOf(context).height * 0.65,
             child: Column(children: [
               ListTile(
-                  title: Text(
-                      context.localeText('进度找回', 'Restore a listening position')),
+                  title: Text(context.localeText(
+                      '进度找回', 'Restore a listening position')),
                   subtitle: Text(context.localeText(
                       '章节开始、睡眠定时与跳转前的位置，最近保留 ${PlaybackCheckpoints.maxEntries} 条',
                       'Chapter starts, sleep timers and positions before seeking; keeps the latest ${PlaybackCheckpoints.maxEntries}')),
@@ -46,8 +46,8 @@ Future<void> showListeningCheckpoints(
                                 context.localeText('开始播放', 'Playback started'),
                               'chapter_start' =>
                                 context.localeText('章节开始播放', 'Chapter started'),
-                              'chapter_middle' => context.localeText(
-                                  '曲目中间', 'Chapter midpoint'),
+                              'chapter_middle' =>
+                                context.localeText('曲目中间', 'Chapter midpoint'),
                               'chapter_end' =>
                                 context.localeText('章节结束', 'Chapter ended'),
                               'interval' =>
@@ -61,11 +61,13 @@ Future<void> showListeningCheckpoints(
                               _ =>
                                 context.localeText('跳转进度前', 'Before seeking'),
                             };
-                            final time =
-                                DateFormat('M/d HH:mm').format(record.updatedAt.toLocal());
+                            final time = DateFormat('M/d HH:mm')
+                                .format(record.updatedAt.toLocal());
                             return ListTile(
                               leading: Icon(switch (entry.reason) {
-                                'sleep' || 'sleep_end' => Icons.bedtime_outlined,
+                                'sleep' ||
+                                'sleep_end' =>
+                                  Icons.bedtime_outlined,
                                 'chapter_start' =>
                                   Icons.play_circle_outline_rounded,
                                 _ => Icons.history_rounded,
@@ -142,8 +144,7 @@ class _ProgressSyncDialogState extends State<_ProgressSyncDialog> {
       if (!mounted) return;
       setState(() {
         if (report.offline) {
-          _notice = context.localeText(
-              '当前离线或未登录，进度已保存在本机，联网后自动补传',
+          _notice = context.localeText('当前离线或未登录，进度已保存在本机，联网后自动补传',
               'Offline or signed out. Progress is saved on this device and uploads later');
         } else if (report.conflicts > 0) {
           _notice = context.localeText(
@@ -153,7 +154,8 @@ class _ProgressSyncDialogState extends State<_ProgressSyncDialog> {
           _error = context.localeText(
               '同步失败：${report.error}', 'Sync failed: ${report.error}');
         } else {
-          _notice = context.localeText('同步完成，进度已是最新', 'Synced; progress is up to date');
+          _notice = context.localeText(
+              '同步完成，进度已是最新', 'Synced; progress is up to date');
         }
       });
     } catch (failure) {

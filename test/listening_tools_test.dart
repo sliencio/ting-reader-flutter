@@ -97,7 +97,7 @@ void main() {
         title: '第一章',
         path: '/audio.mp3',
         chapterIndex: 1);
-    final written = PlaybackCheckpoints.maxEntries + 5;
+    const written = PlaybackCheckpoints.maxEntries + 5;
     await Future.wait(List.generate(
         written,
         (i) => store.add(
@@ -109,7 +109,8 @@ void main() {
     final entries = await store.read('owner');
     expect(entries, hasLength(PlaybackCheckpoints.maxEntries));
     expect(entries.first.record.position, (written - 1) * 10);
-    expect(entries.last.record.position, (written - PlaybackCheckpoints.maxEntries) * 10);
+    expect(entries.last.record.position,
+        (written - PlaybackCheckpoints.maxEntries) * 10);
     expect(await store.read('other'), isEmpty);
   });
 
@@ -125,7 +126,8 @@ void main() {
     await store.add(
         'owner',
         PlaybackCheckpoint(
-            PlaybackResumeRecord(book, [chapter], chapter.id, 5, DateTime.now()),
+            PlaybackResumeRecord(
+                book, [chapter], chapter.id, 5, DateTime.now()),
             'sleep'));
     for (var i = 1; i <= 30; i++) {
       await store.add(
