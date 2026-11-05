@@ -389,6 +389,18 @@ void main() {
     await Future<void>.delayed(Duration.zero);
   }
 
+  Future<void> waitForCheckpoint(String reason) async {
+    final deadline = DateTime.now().add(const Duration(seconds: 2));
+    while (true) {
+      final entries = await player.playbackCheckpoints();
+      if (entries.any((entry) => entry.reason == reason)) return;
+      if (DateTime.now().isAfter(deadline)) {
+        fail('Checkpoint $reason was not recorded');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+  }
+
   Future<File> localAudioFile() async {
     final directory =
         await Directory.systemTemp.createTemp('ting-player-source-');
@@ -667,6 +679,68 @@ void main() {
     player.cancelSleepTimer();
   });
 
+  test('暂停后继续播放记为开始播放而不是新章节', () async {
+    final item = chapter('/data/first.mp3', id: 'first');
+    await player.playChapter(book, [item], item);
+    await waitForPlayback(() => player.isPlaying && !player.isLoading);
+    await player.pause();
+    await waitForPlayback(() => !player.isPlaying);
+    await player.togglePlay();
+    await waitForPlayback(() => player.isPlaying);
+    native.emit(position: const Duration(seconds: 30));
+    await waitForCheckpoint('play_start');
+
+    final reasons =
+        (await player.playbackCheckpoints()).map((entry) => entry.reason);
+    expect(reasons, contains('play_start'));
+    expect(reasons.where((reason) => reason == 'chapter_start'), hasLength(1));
+  });
+
+  test('关闭开始播放触发点后不再记录该时间点', () async {
+    app.settings = {
+      'progress_checkpoint_settings': {'on_play_start': false}
+    };
+    final item = chapter('/data/first.mp3', id: 'first');
+    await player.playChapter(book, [item], item);
+    await waitForPlayback(() => player.isPlaying && !player.isLoading);
+    await player.pause();
+    await waitForPlayback(() => !player.isPlaying);
+    await player.togglePlay();
+    await waitForPlayback(() => player.isPlaying);
+    native.emit(position: const Duration(seconds: 30));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    final reasons =
+        (await player.playbackCheckpoints()).map((entry) => entry.reason);
+    expect(reasons, isNot(contains('play_start')));
+  });
+
+  test('曲目中间只记录一次', () async {
+    app.settings = {
+      'progress_checkpoint_settings': {'on_chapter_middle': true}
+    };
+    final item = chapter('/data/first.mp3', id: 'first');
+    await player.playChapter(book, [item], item);
+    await waitForPlayback(() => player.isPlaying && !player.isLoading);
+    native.emit(position: const Duration(seconds: 400));
+    await waitForCheckpoint('chapter_middle');
+    native.emit(position: const Duration(seconds: 500));
+    await Future<void>.delayed(const Duration(milliseconds: 100));
+
+    final middles = (await player.playbackCheckpoints())
+        .where((entry) => entry.reason == 'chapter_middle');
+    expect(middles, hasLength(1));
+    expect(middles.single.record.chapterId, item.id);
+  });
+
+  test('章节结束时记录一个时间点', () async {
+    final item = chapter('/data/first.mp3', id: 'first');
+    await player.playChapter(book, [item], item, startAt: 630);
+    native.emit(processingState: 4, position: const Duration(seconds: 636));
+    await waitForCheckpoint('chapter_end');
+    expect((await player.playbackCheckpoints()).first.reason, 'chapter_end');
+  });
+
   test('回归_自动切章与按集数结束的时间点归属实际播放章节', () async {
     final first = chapter('/data/first.mp3', id: 'first');
     final second = chapter('/data/second.mp3', id: 'second', index: 1);
@@ -689,7 +763,7 @@ void main() {
     await waitForPlayback(
         () => player.currentChapter?.id == third.id && !player.isPlaying);
 
-    final timeline = await player.playbackTimeline();
+    final timeline = await player.playbackCheckpoints();
     final events =
         timeline.map((entry) => (entry.reason, entry.record.chapterId));
     expect(events.take(2), [
@@ -702,8 +776,6 @@ void main() {
           ('sleep', first.id),
           ('chapter_start', first.id),
         ]));
-    expect((await player.playbackCheckpoints()).map((entry) => entry.reason),
-        ['sleep']);
 
     gate.complete();
     await waitForPlayback(() =>
@@ -739,7 +811,7 @@ void main() {
     }
     await waitForPlayback(() => !player.isPlaying);
 
-    final timeline = await player.playbackTimeline();
+    final timeline = await player.playbackCheckpoints();
     expect(timeline.first.reason, 'sleep_end');
     expect(timeline.first.record.chapterId, item.id);
     expect(player.isPlaying, isFalse);
@@ -1241,7 +1313,7 @@ void main() {
 
     expect(player.sleepEpisodesRemaining, isNull);
     expect(player.error, isNull);
-    final timeline = await player.playbackTimeline();
+    final timeline = await player.playbackCheckpoints();
     expect(timeline.first.reason, 'sleep_end');
     expect(timeline.first.record.chapterId, first.id);
     expect(

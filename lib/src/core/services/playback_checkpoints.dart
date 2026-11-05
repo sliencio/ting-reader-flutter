@@ -9,8 +9,6 @@ class PlaybackCheckpoint {
   const PlaybackCheckpoint(this.record, this.reason);
   final PlaybackResumeRecord record;
   final String reason;
-  static bool isTimelineReason(String reason) =>
-      reason == 'chapter_start' || reason == 'sleep_end';
   Map<String, dynamic> toJson() =>
       {'record': record.toJson(), 'reason': reason};
   factory PlaybackCheckpoint.fromJson(Map<String, dynamic> json) =>
@@ -19,29 +17,22 @@ class PlaybackCheckpoint {
 }
 
 class PlaybackCheckpoints {
+  /// 保留的记录条数上限。每条记录都带完整章节列表，条数不宜随意放大。
+  static const maxEntries = 50;
+
   Future<void> _writes = Future<void>.value();
-  String _key(String identity, {bool timeline = false}) =>
-      '${timeline ? 'playback_timeline' : 'playback_checkpoints'}:'
-      '${base64Url.encode(utf8.encode(identity))}';
+  String _key(String identity) =>
+      'playback_checkpoints:${base64Url.encode(utf8.encode(identity))}';
 
   Future<List<PlaybackCheckpoint>> read(String identity) async {
     await _writes;
-    return _read(_key(identity));
+    return _read(identity);
   }
 
-  Future<List<PlaybackCheckpoint>> readTimeline(String identity) async {
-    await _writes;
-    final entries = [
-      ...await _read(_key(identity, timeline: true)),
-      ...(await _read(_key(identity))).where((item) => item.reason == 'sleep'),
-    ]..sort((a, b) => b.record.updatedAt.compareTo(a.record.updatedAt));
-    return entries.take(20).toList();
-  }
-
-  Future<List<PlaybackCheckpoint>> _read(String key) async {
+  Future<List<PlaybackCheckpoint>> _read(String identity) async {
     final prefs = await SharedPreferences.getInstance();
     try {
-      return asMapList(jsonDecode(prefs.getString(key) ?? '[]'))
+      return asMapList(jsonDecode(prefs.getString(_key(identity)) ?? '[]'))
           .map(PlaybackCheckpoint.fromJson)
           .where((item) =>
               item.record.chapter != null && item.record.position.isFinite)
@@ -51,12 +42,22 @@ class PlaybackCheckpoints {
     }
   }
 
-  Future<void> add(String identity, PlaybackCheckpoint value) {
-    final timeline = PlaybackCheckpoint.isTimelineReason(value.reason);
-    final key = _key(identity, timeline: timeline);
+  /// 写入一条记录；[replace] 为 true 时先丢掉同一本书、同一原因的旧记录。
+  ///
+  /// 定时同步这类高频触发必须用 [replace]，否则会在 [maxEntries] 上限里
+  /// 不断挤掉真正有用的时间点（例如睡眠起点）。
+  Future<void> add(String identity, PlaybackCheckpoint value,
+      {bool replace = false}) {
     final write = _writes.catchError((_) {}).then((_) async {
-      final entries = await _read(key);
-      if (!timeline && value.reason != 'sleep' && entries.isNotEmpty) {
+      final stored = await _read(identity);
+      final entries = replace
+          ? stored
+              .where((item) =>
+                  item.reason != value.reason ||
+                  item.record.book.id != value.record.book.id)
+              .toList()
+          : stored;
+      if (entries.isNotEmpty) {
         final last = entries.first;
         if (last.reason == value.reason &&
             last.record.book.id == value.record.book.id &&
@@ -67,9 +68,9 @@ class PlaybackCheckpoints {
       }
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString(
-          key,
+          _key(identity),
           jsonEncode([value, ...entries]
-              .take(20)
+              .take(maxEntries)
               .map((item) => item.toJson())
               .toList()));
     });

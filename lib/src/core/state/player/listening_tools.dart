@@ -1,36 +1,67 @@
 part of '../player_state.dart';
 
 extension ListeningTools on PlayerState {
-  PlaybackResumeRecord? _listeningSnapshot({bool compact = false}) {
+  PlaybackResumeRecord? _listeningSnapshot() {
     final book = currentBook;
     final chapter = currentChapter;
     if (book == null || chapter == null || !currentTime.isFinite) return null;
-    return PlaybackResumeRecord(book, compact ? [chapter] : List.of(chapters),
-        chapter.id, currentTime, DateTime.now());
+    return PlaybackResumeRecord(
+        book, List.of(chapters), chapter.id, currentTime, DateTime.now());
   }
 
   void _checkpointInBackground(String reason,
-      {PlaybackResumeRecord? snapshot}) {
+      {PlaybackResumeRecord? snapshot, bool replace = false}) {
     final owner = _currentResumeIdentity;
-    final timeline = PlaybackCheckpoint.isTimelineReason(reason);
-    if (timeline && _resumeIdentity != owner) return;
-    final record = snapshot ?? _listeningSnapshot(compact: timeline);
+    final record = snapshot ?? _listeningSnapshot();
     if (record == null || _disposed) return;
     unawaited(_checkpoints
-        .add(owner, PlaybackCheckpoint(record, reason))
+        .add(owner, PlaybackCheckpoint(record, reason), replace: replace)
         .catchError((Object failure) {
       debugPrint('保存进度保护点失败：$failure');
     }));
   }
 
+  /// 关键点：本地留一条进度找回记录，同时把位置推给服务端。
+  ///
+  /// 进度找回必须能从记录直接恢复，所以这里总存完整章节列表；只存单章的
+  /// 快照恢复后队列里只有一章，切下一章会失败。
+  ///
+  /// [replace] 用于定时同步：只保留该书最新一条，避免挤占 20 条名额。
+  void _syncKeyPoint(String reason, {bool replace = false}) {
+    _checkpointInBackground(reason, replace: replace);
+    unawaited(sendProgress());
+  }
+
+  void _applyCheckpointSettings() {
+    final next = PlaybackCheckpointSettings.fromSettings(appState.settings);
+    if (next == _checkpointSettings) return;
+    _checkpointSettings = next;
+    if (_audio.playing) _startIntervalSyncTimer();
+  }
+
+  PlaybackCheckpointSettings get checkpointSettings => _checkpointSettings;
+
+  /// 睡眠定时结束：把最后真正播过的那一章节记进进度找回，并同步服务端。
+  ///
+  /// 按集数睡眠在切章时触发，此刻 [currentChapter] 已经是没播过的新章节，
+  /// 所以调用方必须把切换前的快照传进来；分钟定时则传 null，用当前状态。
+  void _syncSleepEnd([PlaybackResumeRecord? snapshot]) {
+    final record = snapshot ?? _listeningSnapshot();
+    if (record == null || _disposed) return;
+    _checkpointInBackground('sleep_end', snapshot: record);
+    final chapter = record.chapter;
+    if (chapter == null) return;
+    // 显式发送睡眠前的位置：此刻 currentChapter 可能已经是没播过的新章。
+    unawaited(_progress.send((
+      book: record.book,
+      chapter: chapter,
+      position: record.position,
+      duration: chapter.duration.toDouble(),
+    )));
+  }
+
   Future<List<PlaybackCheckpoint>> playbackCheckpoints() =>
       _checkpoints.read(_currentResumeIdentity);
-
-  Future<List<PlaybackCheckpoint>> playbackTimeline() async {
-    final owner = _currentResumeIdentity;
-    final entries = await _checkpoints.readTimeline(owner);
-    return owner == _currentResumeIdentity ? entries : [];
-  }
 
   void _recordChapterStartIfPlaying() {
     final book = currentBook;
@@ -54,9 +85,39 @@ extension ListeningTools on PlayerState {
     if (_sleepUnplayedChapterId == chapter.id) _sleepUnplayedChapterId = null;
     final key = (owner: owner, book: book.id, chapter: chapter.id);
     if (_lastRecordedChapterStart == key) return;
+    // 同一章再次起播算「开始播放」，换到别的章才算「下一章开始」。
+    final resumedSameChapter = _lastPlayedChapterKey == key;
+    _lastPlayedChapterKey = key;
+    final settings = _checkpointSettings;
     _lastRecordedChapterStart = key;
-    _checkpointInBackground('chapter_start');
-    unawaited(_progress.send());
+    if (resumedSameChapter) {
+      if (settings.onPlayStart) _syncKeyPoint('play_start');
+      return;
+    }
+    if (settings.onChapterStart) _syncKeyPoint('chapter_start');
+  }
+
+  /// 曲目播到中间时记一次；每章只触发一次。
+  void _recordChapterMiddleIfNeeded() {
+    if (!_checkpointSettings.onChapterMiddle ||
+        _disposed ||
+        _connectingPlayback ||
+        _selectionPending ||
+        _suppressPositionUpdates ||
+        _applyingQueueStartSeek ||
+        !_audio.playing ||
+        duration <= 0) {
+      return;
+    }
+    final book = currentBook;
+    final chapter = currentChapter;
+    if (book == null || chapter == null || currentTime < duration / 2) return;
+    final owner = _currentResumeIdentity;
+    if (_resumeIdentity != owner) return;
+    final key = (owner: owner, chapter: chapter.id);
+    if (_middleRecordedKey == key) return;
+    _middleRecordedKey = key;
+    _syncKeyPoint('chapter_middle');
   }
 
   Future<void> restoreCheckpoint(PlaybackCheckpoint checkpoint) async {
@@ -149,6 +210,7 @@ extension ListeningTools on PlayerState {
     if (duration > 0 && _furthestChapterPosition < duration - outro - 2) return;
     final key = '$_currentResumeIdentity:${chapter.id}';
     if (!_finishedChapters.add(key)) return;
+    if (_checkpointSettings.onChapterEnd) _syncKeyPoint('chapter_end');
     final book = currentBook;
     if (book != null) {
       unawaited(appState.chapterReadSync
@@ -167,6 +229,7 @@ extension ListeningTools on PlayerState {
 
   void _onListeningConnectionChanged() {
     if (_disposed) return;
+    _applyCheckpointSettings();
     unawaited(_progress.journal.flush());
     unawaited(appState.chapterReadSync.flush());
     _notifyIfActive();

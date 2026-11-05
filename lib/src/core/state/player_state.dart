@@ -15,6 +15,7 @@ import '../api/api_client.dart';
 import '../api/api_error.dart';
 import '../models/models.dart';
 import '../utils/chapter_sort.dart';
+import '../utils/checkpoint_settings.dart';
 import '../utils/urls.dart';
 import '../services/playback_resume_store.dart';
 import '../services/playback_skip_store.dart';
@@ -65,6 +66,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
         _furthestChapterPosition = currentTime;
       }
       _recordChapterStartIfPlaying();
+      _recordChapterMiddleIfNeeded();
       _handleSkipOutro();
       if (DateTime.now().difference(_lastResumeSave).inSeconds >= 5) {
         _lastResumeSave = DateTime.now();
@@ -99,6 +101,8 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
         _startProgressTimer();
       } else {
         _stopProgressTimers();
+        // 重新播放同一章也要算一个关键点，暂停后清掉去重标记。
+        _lastRecordedChapterStart = null;
         if (!_gatewayReauthenticationPending) {
           unawaited(sendProgress());
         }
@@ -135,6 +139,8 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
       audio_background.JustAudioBackground.setAudioFocusEnabled(true);
     }
     _audioSessionReady = _initializeAudioSession();
+    _checkpointSettings =
+        PlaybackCheckpointSettings.fromSettings(appState.settings);
     downloadState.network.addListener(_onListeningNetworkChanged);
     appState.addListener(_onListeningConnectionChanged);
     _progress.journal.addListener(_notifyIfActive);
@@ -259,13 +265,18 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   bool _suppressAutoPlay = false;
   bool _stoppingForEpisodeSleep = false;
   String? _sleepUnplayedChapterId;
+  Timer? _intervalSyncTimer;
+  PlaybackCheckpointSettings _checkpointSettings =
+      const PlaybackCheckpointSettings();
   ({String owner, String book, String chapter})? _lastRecordedChapterStart;
+  ({String owner, String book, String chapter})? _lastPlayedChapterKey;
+  ({String owner, String chapter})? _middleRecordedKey;
   // 按集数睡眠：剩余可播集数（含当前集）。章节切换时递减，归零即暂停。
   late final PlaybackSleep _sleep = PlaybackSleep(
     isPlaying: () => isPlaying,
     onChanged: _notifyIfActive,
     onExpire: () async {
-      _checkpointInBackground('sleep_end');
+      _syncSleepEnd();
       try {
         await pause();
       } catch (failure) {
@@ -356,6 +367,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     if (!_volumeInitialized) {
       await _setPlayerVolume(nextVolume ?? 1, persist: false);
     }
+    _applyCheckpointSettings();
     await setIgnoreAudioFocus(next);
   }
 
@@ -366,6 +378,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void cancelEpisodeSleepTimer() => _cancelEpisodeSleep();
+
   int? get sleepEpisodesRemaining => _sleep.episodes;
   int? get sleepRemainingSeconds => _sleep.seconds;
   void startSleepTimer(int minutes) {
@@ -514,6 +527,12 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     await Future.wait([local, remote]);
   }
 
+  /// 「立即同步」：先把当前位置记进待同步，再补传，最后回报结果。
+  Future<ListeningSyncReport> syncProgressNow() async {
+    if (!_selectionPending) await _progress.send();
+    return progressSync.syncNow();
+  }
+
   _ProgressSnapshot? _progressSnapshot() {
     final book = currentBook;
     final chapter = currentChapter;
@@ -574,6 +593,29 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  /// 按用户设置的间隔定时同步进度；0 表示关闭。
+  ///
+  /// 只写一条记录（替换该书旧的定时记录），不占用进度找回的 20 条名额。
+  void _startIntervalSyncTimer() {
+    _stopIntervalSyncTimer();
+    final minutes = _checkpointSettings.intervalMinutes;
+    if (_disposed || minutes <= 0) return;
+    _intervalSyncTimer = Timer.periodic(Duration(minutes: minutes), (_) {
+      if (_disposed ||
+          !_audio.playing ||
+          _gatewayReauthenticationPending ||
+          _sleepUnplayedChapterId != null) {
+        return;
+      }
+      _syncKeyPoint('interval', replace: true);
+    });
+  }
+
+  void _stopIntervalSyncTimer() {
+    _intervalSyncTimer?.cancel();
+    _intervalSyncTimer = null;
+  }
+
   void _startProgressTimer() {
     if (_disposed ||
         _gatewayReauthenticationPending ||
@@ -582,9 +624,13 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     _progress.start();
+    _startIntervalSyncTimer();
   }
 
-  void _stopProgressTimers() => _progress.stop();
+  void _stopProgressTimers() {
+    _stopIntervalSyncTimer();
+    _progress.stop();
+  }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -606,6 +652,7 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     downloadState.network.removeListener(_onListeningNetworkChanged);
     appState.removeListener(_onListeningConnectionChanged);
     _progress.journal.removeListener(_notifyIfActive);
+    _stopIntervalSyncTimer();
     _sleep.dispose();
     _playGeneration++;
     _seekGeneration++;

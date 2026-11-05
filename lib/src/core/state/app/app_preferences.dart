@@ -40,6 +40,7 @@ class _AppPreferences {
     'player_volume',
     'desktop_close_behavior',
     'smart_rewind_seconds',
+    'progress_checkpoint_settings',
   };
   static const _obsoleteLocalSettingKeys = <String>{
     'resume_after_interruption',

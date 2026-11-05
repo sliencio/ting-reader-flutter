@@ -446,6 +446,8 @@ class _PlaybackSection extends StatelessWidget {
     required this.openDownloads,
     required this.rewindSeconds,
     required this.onRewind,
+    required this.checkpointSettings,
+    required this.onCheckpointSettings,
     required this.ignoreAudioFocus,
     required this.showAudioFocusSetting,
     required this.onSpeed,
@@ -461,6 +463,8 @@ class _PlaybackSection extends StatelessWidget {
   final VoidCallback? openDownloads;
   final int rewindSeconds;
   final ValueChanged<int> onRewind;
+  final PlaybackCheckpointSettings checkpointSettings;
+  final ValueChanged<PlaybackCheckpointSettings> onCheckpointSettings;
   final bool ignoreAudioFocus;
   final bool showAudioFocusSetting;
   final ValueChanged<double> onSpeed;
@@ -564,6 +568,11 @@ class _PlaybackSection extends StatelessWidget {
                   trailing: const Icon(Icons.chevron_right_rounded),
                   onTap: openDownloads,
                 )),
+          _SettingDivider(),
+          _CheckpointTriggerSettings(
+            value: checkpointSettings,
+            onChanged: onCheckpointSettings,
+          ),
           if (showAudioFocusSetting) ...[
             _SettingDivider(),
             _ToggleSettingRow(
@@ -575,6 +584,91 @@ class _PlaybackSection extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _CheckpointTriggerSettings extends StatelessWidget {
+  const _CheckpointTriggerSettings({
+    required this.value,
+    required this.onChanged,
+  });
+
+  final PlaybackCheckpointSettings value;
+  final ValueChanged<PlaybackCheckpointSettings> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final interval = value.intervalMinutes;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 18),
+        _SettingCopy(
+          title: context.localeText('进度保护点', 'Progress checkpoints'),
+          subtitle: context.localeText(
+              '选择什么时候在进度找回里留一条记录，并同步到服务端',
+              'Choose when a recovery record is kept and synced to the server'),
+        ),
+        _ToggleSettingRow(
+          title: context.localeText('开始播放', 'Playback starts'),
+          subtitle: context.localeText('开始播放或暂停后继续时记录',
+              'When playback starts, including resuming after a pause'),
+          value: value.onPlayStart,
+          onChanged: (next) => onChanged(value.copyWith(onPlayStart: next)),
+        ),
+        _SettingDivider(),
+        _ToggleSettingRow(
+          title: context.localeText('下一章开始', 'Next chapter starts'),
+          subtitle: context.localeText('切换到新的一章时记录',
+              'When playback moves to a new chapter'),
+          value: value.onChapterStart,
+          onChanged: (next) => onChanged(value.copyWith(onChapterStart: next)),
+        ),
+        _SettingDivider(),
+        _ToggleSettingRow(
+          title: context.localeText('曲目中间', 'Chapter midpoint'),
+          subtitle: context.localeText('每章播放过半时记录一次，方便找回听过的位置',
+              'Once per chapter at the halfway point'),
+          value: value.onChapterMiddle,
+          onChanged: (next) =>
+              onChanged(value.copyWith(onChapterMiddle: next)),
+        ),
+        _SettingDivider(),
+        _ToggleSettingRow(
+          title: context.localeText('章节结束', 'Chapter ends'),
+          subtitle: context.localeText('一章听完时记录', 'When a chapter finishes'),
+          value: value.onChapterEnd,
+          onChanged: (next) => onChanged(value.copyWith(onChapterEnd: next)),
+        ),
+        _SettingDivider(),
+        Padding(
+          padding: const EdgeInsets.only(top: 18),
+          child: DropdownButtonFormField<int>(
+            key: ValueKey('checkpoint_interval_$interval'),
+            initialValue: interval,
+            decoration: InputDecoration(
+              labelText: context.localeText('定时同步', 'Timed sync'),
+              helperText: context.localeText(
+                  '按间隔同步最新位置，只保留每本书一条，不占用记录名额',
+                  'Syncs the latest position on an interval; keeps one entry per book so it never fills up the list'),
+            ),
+            items: PlaybackCheckpointSettings.intervalOptions
+                .map((minutes) => DropdownMenuItem(
+                    value: minutes,
+                    child: Text(minutes == 0
+                        ? context.localeText('关闭', 'Off')
+                        : context.localeText('每 $minutes 分钟', 'Every $minutes min'))))
+                .toList(),
+            onChanged: (next) {
+              if (next != null) {
+                onChanged(value.copyWith(intervalMinutes: next));
+              }
+            },
+          ),
+        ),
+        const SizedBox(height: 6),
+      ],
     );
   }
 }

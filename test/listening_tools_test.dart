@@ -10,6 +10,7 @@ import 'package:ting_reader_flutter/src/core/services/listening_progress_sync.da
 import 'package:ting_reader_flutter/src/core/services/playback_checkpoints.dart';
 import 'package:ting_reader_flutter/src/core/services/playback_resume_store.dart';
 import 'package:ting_reader_flutter/src/core/state/download/smart_cache_policy.dart';
+import 'package:ting_reader_flutter/src/core/utils/checkpoint_settings.dart';
 
 class _SyncApi extends ApiClient {
   final uploaded = <Map<String, dynamic>>[];
@@ -87,7 +88,7 @@ void main() {
     expect(await prefs.speed('server:user1', 'other'), 1.2);
   });
 
-  test('进度保护并发写入保留最新二十条，按账号隔离', () async {
+  test('进度保护并发写入保留最新五十条，按账号隔离', () async {
     final store = PlaybackCheckpoints();
     const book = Book(id: 'book', libraryId: 'lib', title: '测试书');
     const chapter = Chapter(
@@ -96,8 +97,9 @@ void main() {
         title: '第一章',
         path: '/audio.mp3',
         chapterIndex: 1);
+    final written = PlaybackCheckpoints.maxEntries + 5;
     await Future.wait(List.generate(
-        25,
+        written,
         (i) => store.add(
             'owner',
             PlaybackCheckpoint(
@@ -105,10 +107,66 @@ void main() {
                     book, [chapter], chapter.id, i * 10, DateTime.now()),
                 'seek'))));
     final entries = await store.read('owner');
-    expect(entries, hasLength(20));
-    expect(entries.first.record.position, 240);
-    expect(entries.last.record.position, 50);
+    expect(entries, hasLength(PlaybackCheckpoints.maxEntries));
+    expect(entries.first.record.position, (written - 1) * 10);
+    expect(entries.last.record.position, (written - PlaybackCheckpoints.maxEntries) * 10);
     expect(await store.read('other'), isEmpty);
+  });
+
+  test('定时同步的进度点按书替换，不挤占其余记录名额', () async {
+    final store = PlaybackCheckpoints();
+    const book = Book(id: 'book', libraryId: 'lib', title: '测试书');
+    const chapter = Chapter(
+        id: 'chapter',
+        bookId: 'book',
+        title: '第一章',
+        path: '/audio.mp3',
+        chapterIndex: 1);
+    await store.add(
+        'owner',
+        PlaybackCheckpoint(
+            PlaybackResumeRecord(book, [chapter], chapter.id, 5, DateTime.now()),
+            'sleep'));
+    for (var i = 1; i <= 30; i++) {
+      await store.add(
+          'owner',
+          PlaybackCheckpoint(
+              PlaybackResumeRecord(
+                  book, [chapter], chapter.id, i * 10.0, DateTime.now()),
+              'interval'),
+          replace: true);
+    }
+    final entries = await store.read('owner');
+    expect(entries.where((entry) => entry.reason == 'interval'), hasLength(1));
+    expect(entries.first.reason, 'interval');
+    expect(entries.first.record.position, 300);
+    expect(entries.where((entry) => entry.reason == 'sleep'), hasLength(1));
+  });
+
+  test('进度保护点设置解析缺省值并拒绝非法间隔', () {
+    const defaults = PlaybackCheckpointSettings();
+    expect(PlaybackCheckpointSettings.fromSettings({}), defaults);
+    expect(
+        PlaybackCheckpointSettings.fromSettings({
+          'settings_json': {
+            'progress_checkpoint_settings': {
+              'on_chapter_middle': true,
+              'interval_minutes': 5,
+            }
+          }
+        }),
+        const PlaybackCheckpointSettings(
+            onChapterMiddle: true, intervalMinutes: 5));
+    expect(
+        PlaybackCheckpointSettings.fromSettings({
+          'progress_checkpoint_settings': {'interval_minutes': 7}
+        }).intervalMinutes,
+        0);
+    expect(
+        PlaybackCheckpointSettings.fromSettings({
+          'progress_checkpoint_settings': {'interval_minutes': -3}
+        }).intervalMinutes,
+        0);
   });
 
   test('智能缓存窗口从当前章开始且不超出书籍末尾', () {

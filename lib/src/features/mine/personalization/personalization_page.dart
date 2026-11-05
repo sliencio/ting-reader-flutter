@@ -9,6 +9,7 @@ import '../../../core/state/player_state.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/utils/home_layout.dart';
 import '../../../core/utils/application_time_zone.dart';
+import '../../../core/utils/checkpoint_settings.dart';
 import '../../../core/utils/locale.dart';
 import '../../../shared/app_scope.dart';
 import '../../../shared/common/common_widgets.dart';
@@ -51,6 +52,8 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
   String _widgetEmbedType = 'private';
   String _applicationTimeZone = defaultApplicationTimeZone;
   bool _timeZoneSaving = false;
+  PlaybackCheckpointSettings _checkpointSettings =
+      const PlaybackCheckpointSettings();
 
   @override
   void didChangeDependencies() {
@@ -83,6 +86,7 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
   void _applySettings(Map<String, dynamic> data) {
     final nested = asMap(data['settings_json']);
     _homeLayout = HomeLayoutSettings.fromSettings(data);
+    _checkpointSettings = PlaybackCheckpointSettings.fromSettings(data);
     final theme = _stringValue(data, 'theme', fallback: 'system');
     _theme = theme == 'auto' ? 'system' : theme;
     _language = normalizeLanguage(
@@ -208,6 +212,19 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
   Future<void> _saveHomeLayout(HomeLayoutSettings next) async {
     setState(() => _homeLayout = next);
     await _saveSettings({'home_layout': next.toJson()});
+  }
+
+  Future<void> _saveCheckpointSettings(PlaybackCheckpointSettings next) async {
+    setState(() => _checkpointSettings = next);
+    final appState = AppScope.appOf(context);
+    try {
+      await appState.updateLocalSettings({
+        PlaybackCheckpointSettings.settingKey: next.toJson(),
+      });
+    } catch (error) {
+      if (!mounted) return;
+      _showSnack(context.l10n.commonSaveFailed(ApiError.messageFor(error)));
+    }
   }
 
   Future<void> _saveApplicationTimeZone(String value) async {
@@ -382,6 +399,8 @@ class _PersonalizationPageState extends State<PersonalizationPage> {
                 await AppScope.playerOf(context).setSmartRewind(value);
                 if (mounted) setState(() {});
               },
+              checkpointSettings: _checkpointSettings,
+              onCheckpointSettings: _saveCheckpointSettings,
               ignoreAudioFocus: _ignoreAudioFocus,
               showAudioFocusSetting:
                   Theme.of(context).platform == TargetPlatform.android,

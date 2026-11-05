@@ -9,7 +9,6 @@ import '../../core/utils/application_time_zone.dart';
 import '../../shared/app_scope.dart';
 import '../../shared/cards/book_card.dart';
 import '../../shared/common/common_widgets.dart';
-import '../player/listening_tools_panel.dart';
 import 'activity_book_card.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -271,17 +270,6 @@ class _HistoryPageState extends State<HistoryPage> {
                   icon: const Icon(Icons.checklist_rounded),
                   label: Text(context.localeText('选择', 'Select'))),
         ),
-        if (!_selectionMode)
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => showListeningCheckpoints(
-                  context, AppScope.playerOf(context),
-                  timeline: true),
-              icon: const Icon(Icons.timeline_rounded),
-              label: Text(context.localeText('播放时间点', 'Playback timeline')),
-            ),
-          ),
         if (_selectionMode) ...[
           const SizedBox(height: 14),
           Wrap(spacing: 6, runSpacing: 6, children: [

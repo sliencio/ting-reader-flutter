@@ -45,6 +45,21 @@ class PendingListeningProgress {
 
 typedef _PendingChapters = Map<String, PendingListeningProgress>;
 
+/// 「立即同步」的结果，界面据此区分成功、失败与离线。
+class ListeningSyncReport {
+  const ListeningSyncReport({
+    required this.pending,
+    required this.conflicts,
+    required this.error,
+    required this.offline,
+  });
+  final int pending;
+  final int conflicts;
+  final String? error;
+  final bool offline;
+  bool get succeeded => !offline && error == null && pending == 0;
+}
+
 class ListeningProgressSync extends ChangeNotifier {
   ListeningProgressSync(
       {required this.api, required this.identity, required this.canSync});
@@ -309,6 +324,21 @@ class ListeningProgressSync extends ChangeNotifier {
     }).whenComplete(() {
       _flushing = null;
     });
+  }
+
+  /// 「立即同步」按钮使用：等这一轮上传结束后给出可展示的结果。
+  ///
+  /// [flush] 本身只做后台补传，失败也只写进 [error]，调用方无法知道到底
+  /// 成功没有；这里把离线、失败、仍有待传和进度冲突都显式报出来。
+  Future<ListeningSyncReport> syncNow() async {
+    final offline = _disposed || !canSync();
+    await flush();
+    return ListeningSyncReport(
+      pending: pendingCount,
+      conflicts: conflicts.length,
+      error: error,
+      offline: offline,
+    );
   }
 
   Future<void> _flush() async {

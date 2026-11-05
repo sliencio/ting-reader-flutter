@@ -10,24 +10,23 @@ extension _PlayerPlayback on PlayerState {
 
   void _finishEpisodeSleepAtBookEnd() {
     if (_sleep.episodes != 1) return;
-    _checkpointInBackground('sleep_end');
+    _syncSleepEnd();
     _sleep.cancel();
   }
 
   /// 队列模式下集数用完时确定性停止底层音频。
-  Future<void> _pauseForEpisodeSleep(_ProgressSnapshot? lastPlayed) async {
+  Future<void> _pauseForEpisodeSleep() async {
     _cancelFocusRecovery(clearResume: true);
     // Android/Windows 在队列切集时可能先上报 playing=false，导致 pause()
     // 短路而未通知原生播放器。stop() 始终停掉平台播放器，同时保留音源状态。
     _stoppingForEpisodeSleep = true;
-    final sync =
-        lastPlayed == null ? Future<void>.value() : _progress.send(lastPlayed);
     try {
       await _audio.stop();
     } finally {
       _stoppingForEpisodeSleep = false;
     }
-    await Future.wait([_saveResumeRecord(), sync]);
+    // 睡眠结束的位置与进度已由 _syncSleepEnd 写入，这里不能再拿新章节覆盖。
+    await _saveResumeRecord();
   }
 
   Future<void> _playChapter(
@@ -37,11 +36,8 @@ extension _PlayerPlayback on PlayerState {
     double? startAt,
     bool autoPlay = true,
   }) async {
-    final sleepEnd =
-        _sleep.episodes == 1 && _resumeIdentity == _currentResumeIdentity
-            ? _listeningSnapshot(compact: true)
-            : null;
-    final lastPlayed = sleepEnd == null ? null : _progressSnapshot();
+    // 集数睡眠在切章时到期：最后播放的位置要在改章节之前取。
+    final sleepEnd = _sleep.episodes == 1 ? _listeningSnapshot() : null;
     final playGeneration = ++_playGeneration;
     _connectingPlayback = true;
     _selectionPending = false;
@@ -100,10 +96,7 @@ extension _PlayerPlayback on PlayerState {
     if (_checkEpisodeSleepOnChapterChange()) {
       _suppressAutoPlay = true;
       _sleepUnplayedChapterId = targetChapter.id;
-      if (sleepEnd != null) {
-        _checkpointInBackground('sleep_end', snapshot: sleepEnd);
-      }
-      if (lastPlayed != null) unawaited(_progress.send(lastPlayed));
+      _syncSleepEnd(sleepEnd);
     }
     _notifyIfActive();
     _updateListeningCache();
@@ -528,9 +521,7 @@ extension _PlayerPlayback on PlayerState {
     }
     final nextChapter = chapters[index];
     if (currentChapter?.id == nextChapter.id) return;
-    final sleepEnd =
-        _sleep.episodes == 1 ? _listeningSnapshot(compact: true) : null;
-    final lastPlayed = sleepEnd == null ? null : _progressSnapshot();
+    final sleepEnd = _sleep.episodes == 1 ? _listeningSnapshot() : null;
     final book = currentBook;
     final outro = book?.skipOutro ?? 0;
     if (previousIndex >= 0 &&
@@ -561,10 +552,8 @@ extension _PlayerPlayback on PlayerState {
     final shouldStopForSleep = _checkEpisodeSleepOnChapterChange();
     if (shouldStopForSleep) {
       _sleepUnplayedChapterId = nextChapter.id;
-      if (sleepEnd != null) {
-        _checkpointInBackground('sleep_end', snapshot: sleepEnd);
-      }
-      unawaited(_pauseForEpisodeSleep(lastPlayed));
+      _syncSleepEnd(sleepEnd);
+      unawaited(_pauseForEpisodeSleep());
       _notifyIfActive();
       return;
     }

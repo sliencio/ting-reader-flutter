@@ -2,16 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 import '../../core/api/api_error.dart';
+import '../../core/services/playback_checkpoints.dart';
 import '../../core/state/player_state.dart';
-import '../../core/utils/application_time_zone.dart';
 import '../../core/utils/formatters.dart';
 import '../../core/utils/locale.dart';
 
-Future<void> showListeningCheckpoints(BuildContext context, PlayerState player,
-    {bool timeline = false}) async {
-  final entries = await (timeline
-      ? player.playbackTimeline()
-      : player.playbackCheckpoints());
+Future<void> showListeningCheckpoints(
+    BuildContext context, PlayerState player) async {
+  final entries = await player.playbackCheckpoints();
   if (!context.mounted) return;
   await showModalBottomSheet<void>(
       context: context,
@@ -21,26 +19,19 @@ Future<void> showListeningCheckpoints(BuildContext context, PlayerState player,
             height: MediaQuery.sizeOf(context).height * 0.65,
             child: Column(children: [
               ListTile(
-                  title: Text(timeline
-                      ? context.localeText('播放时间点', 'Playback timeline')
-                      : context.localeText(
-                          '进度找回', 'Restore a listening position')),
-                  subtitle: Text(timeline
-                      ? context.localeText(
-                          '本机最近 20 条', 'Latest 20 on this device')
-                      : context.localeText('跳转前和开始睡眠定时的位置，最近保留 20 条',
-                          'Before navigation and sleep timers; keeps the latest 20 positions')),
+                  title: Text(
+                      context.localeText('进度找回', 'Restore a listening position')),
+                  subtitle: Text(context.localeText(
+                      '章节开始、睡眠定时与跳转前的位置，最近保留 ${PlaybackCheckpoints.maxEntries} 条',
+                      'Chapter starts, sleep timers and positions before seeking; keeps the latest ${PlaybackCheckpoints.maxEntries}')),
                   trailing: IconButton(
                       onPressed: () => Navigator.pop(sheetContext),
                       icon: const Icon(Icons.close_rounded))),
               Expanded(
                   child: entries.isEmpty
                       ? Center(
-                          child: Text(timeline
-                              ? context.localeText(
-                                  '还没有播放时间点', 'No playback events yet')
-                              : context.localeText(
-                                  '还没有进度保护记录', 'No saved positions yet')))
+                          child: Text(context.localeText(
+                              '还没有进度保护记录', 'No saved positions yet')))
                       : ListView.builder(
                           itemCount: entries.length,
                           itemBuilder: (_, index) {
@@ -51,8 +42,16 @@ Future<void> showListeningCheckpoints(BuildContext context, PlayerState player,
                                   '睡眠定时起点', 'Sleep timer started'),
                               'sleep_end' => context.localeText(
                                   '睡眠定时结束', 'Sleep timer ended'),
+                              'play_start' =>
+                                context.localeText('开始播放', 'Playback started'),
                               'chapter_start' =>
                                 context.localeText('章节开始播放', 'Chapter started'),
+                              'chapter_middle' => context.localeText(
+                                  '曲目中间', 'Chapter midpoint'),
+                              'chapter_end' =>
+                                context.localeText('章节结束', 'Chapter ended'),
+                              'interval' =>
+                                context.localeText('定时同步', 'Timed sync'),
                               'chapter' => context.localeText(
                                   '切换章节前', 'Before switching chapters'),
                               'restore' => context.localeText(
@@ -62,16 +61,15 @@ Future<void> showListeningCheckpoints(BuildContext context, PlayerState player,
                               _ =>
                                 context.localeText('跳转进度前', 'Before seeking'),
                             };
-                            final time = DateFormat(timeline
-                                    ? 'yyyy-MM-dd HH:mm:ss'
-                                    : 'M/d HH:mm')
-                                .format(timeline
-                                    ? toApplicationTimeZone(record.updatedAt)
-                                    : record.updatedAt.toLocal());
+                            final time =
+                                DateFormat('M/d HH:mm').format(record.updatedAt.toLocal());
                             return ListTile(
-                              leading: Icon(entry.reason == 'sleep'
-                                  ? Icons.bedtime_outlined
-                                  : Icons.history_rounded),
+                              leading: Icon(switch (entry.reason) {
+                                'sleep' || 'sleep_end' => Icons.bedtime_outlined,
+                                'chapter_start' =>
+                                  Icons.play_circle_outline_rounded,
+                                _ => Icons.history_rounded,
+                              }),
                               title: Text(
                                   '${record.book.title} · ${record.chapter?.title ?? ''}',
                                   maxLines: 2,
@@ -79,22 +77,19 @@ Future<void> showListeningCheckpoints(BuildContext context, PlayerState player,
                               subtitle: Text(
                                   '$reason · ${formatDurationShort(record.position)}\n$time'),
                               isThreeLine: true,
-                              onTap: timeline
-                                  ? null
-                                  : () async {
-                                      Navigator.pop(sheetContext);
-                                      try {
-                                        await player.restoreCheckpoint(entry);
-                                      } catch (failure) {
-                                        if (context.mounted) {
-                                          ScaffoldMessenger.of(context)
-                                              .showSnackBar(SnackBar(
-                                                  content: Text(
-                                                      ApiError.messageFor(
-                                                          failure))));
-                                        }
-                                      }
-                                    },
+                              onTap: () async {
+                                Navigator.pop(sheetContext);
+                                try {
+                                  await player.restoreCheckpoint(entry);
+                                } catch (failure) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                            content: Text(
+                                                ApiError.messageFor(failure))));
+                                  }
+                                }
+                              },
                             );
                           },
                         )),
@@ -118,14 +113,49 @@ class _ProgressSyncDialog extends StatefulWidget {
 class _ProgressSyncDialogState extends State<_ProgressSyncDialog> {
   bool _busy = false;
   String? _error;
+  String? _notice;
   Future<void> _run(Future<void> Function() action) async {
     if (_busy) return;
     setState(() {
       _busy = true;
       _error = null;
+      _notice = null;
     });
     try {
       await action();
+    } catch (failure) {
+      if (mounted) setState(() => _error = ApiError.messageFor(failure));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _syncNow() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+      _notice = null;
+    });
+    try {
+      final report = await widget.player.syncProgressNow();
+      if (!mounted) return;
+      setState(() {
+        if (report.offline) {
+          _notice = context.localeText(
+              '当前离线或未登录，进度已保存在本机，联网后自动补传',
+              'Offline or signed out. Progress is saved on this device and uploads later');
+        } else if (report.conflicts > 0) {
+          _notice = context.localeText(
+              '已上传部分进度，还有 ${report.conflicts} 本书需要先选择保留哪个位置',
+              'Some progress uploaded. ${report.conflicts} books need you to choose which position to keep');
+        } else if (report.error != null) {
+          _error = context.localeText(
+              '同步失败：${report.error}', 'Sync failed: ${report.error}');
+        } else {
+          _notice = context.localeText('同步完成，进度已是最新', 'Synced; progress is up to date');
+        }
+      });
     } catch (failure) {
       if (mounted) setState(() => _error = ApiError.messageFor(failure));
     } finally {
@@ -182,12 +212,16 @@ class _ProgressSyncDialogState extends State<_ProgressSyncDialog> {
                         Text(_error!,
                             style: TextStyle(
                                 color: Theme.of(context).colorScheme.error)),
+                      if (_notice != null)
+                        Text(_notice!,
+                            style: TextStyle(
+                                color: Theme.of(context).colorScheme.primary)),
                       if (_busy) const LinearProgressIndicator(),
                     ],
                   ))),
               actions: [
                 TextButton(
-                    onPressed: _busy ? null : () => _run(sync.flush),
+                    onPressed: _busy ? null : _syncNow,
                     child: Text(context.localeText('立即同步', 'Sync now'))),
                 TextButton(
                     onPressed: _busy ? null : () => Navigator.pop(context),
