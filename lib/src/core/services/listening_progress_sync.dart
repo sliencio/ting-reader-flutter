@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/api_client.dart';
+import '../api/api_error.dart';
 import '../models/models.dart';
 
 class PendingListeningProgress {
@@ -90,15 +91,39 @@ class ListeningProgressSync extends ChangeNotifier {
         chapters.containsKey(chapterId);
   }
 
-  PendingListeningProgress? _latestPending(String owner, String bookId) =>
-      _pending[owner]?[bookId]?.values.lastOrNull;
+  /// 这本书最新的一条待传记录。
+  ///
+  /// 必须按时间取，不能取插入顺序的最后一条：从本机缓存恢复时顺序是
+  /// 序列化顺序，未必等于播放顺序，取错会导致上传前的核对永远不相等，
+  /// 于是这本书的进度一直排着传不出去。
+  PendingListeningProgress? _latestPending(String owner, String bookId) {
+    final chapters = _pending[owner]?[bookId];
+    if (chapters == null || chapters.isEmpty) return null;
+    return chapters.values
+        .reduce((a, b) => b.updatedAt.isAfter(a.updatedAt) ? b : a);
+  }
 
-  void _removePending(String owner, PendingListeningProgress value) {
-    final books = _pending[owner]!;
-    final chapters = books[value.bookId];
-    if (!identical(chapters?[value.chapterId], value)) return;
-    chapters!.remove(value.chapterId);
-    if (chapters.isEmpty) books.remove(value.bookId);
+  /// 这本书最早的一条待传记录，用来和服务端回传的位置比对。
+  PendingListeningProgress? _earliestPending(String owner, String bookId) {
+    final chapters = _pending[owner]?[bookId];
+    if (chapters == null || chapters.isEmpty) return null;
+    return chapters.values
+        .reduce((a, b) => b.updatedAt.isBefore(a.updatedAt) ? b : a);
+  }
+
+  /// 服务端已经收到了某个位置，比它更旧的待传记录就没有意义了。
+  ///
+  /// 按对象身份比较，不能按时间截断：同一秒内连续记录两次位置很常见，
+  /// 用 `!isAfter(upTo)` 会把刚记下的新位置一起删掉。
+  void _dropPendingUpTo(
+      String owner, String bookId, PendingListeningProgress acknowledged) {
+    final books = _pending[owner];
+    final chapters = books?[bookId];
+    if (chapters == null) return;
+    chapters.removeWhere((_, item) =>
+        item.updatedAt.isBefore(acknowledged.updatedAt) ||
+        (identical(item, acknowledged)));
+    if (chapters.isEmpty) books!.remove(bookId);
   }
 
   String _key(String owner) =>
@@ -191,15 +216,17 @@ class ListeningProgressSync extends ChangeNotifier {
         return;
       }
       final chapters = _pending[owner]![remote.bookId];
-      final pending = chapters?.values.lastOrNull;
-      final first = chapters?.values.firstOrNull;
+      final pending = _latestPending(owner, remote.bookId);
+      final first = _earliestPending(owner, remote.bookId);
       final matchesFirst = first != null &&
           remote.chapterId == first.chapterId &&
           (remote.position - first.position).abs() < 1;
       if (data['device_id'] == _deviceId) {
         _acknowledged[owner]![remote.bookId] = remote;
-        if (matchesFirst) _removePending(owner, first);
-        await _persist(owner);
+        if (matchesFirst) {
+          _dropPendingUpTo(owner, remote.bookId, first);
+          await _persist(owner);
+        }
         _notify();
         return;
       }
@@ -211,10 +238,10 @@ class ListeningProgressSync extends ChangeNotifier {
       }
       if (matchesFirst) {
         _acknowledged[owner]![remote.bookId] = remote;
-        _removePending(owner, first);
+        _dropPendingUpTo(owner, remote.bookId, first);
         await _persist(owner);
         _notify();
-      } else if (pending == null && (applyRemote?.call() ?? false)) {
+      } else if (chapters == null && (applyRemote?.call() ?? false)) {
         _acknowledged[owner]![remote.bookId] = remote;
         await _persist(owner);
       }
@@ -351,38 +378,32 @@ class ListeningProgressSync extends ChangeNotifier {
         canSync();
     await initialize();
     if (!active()) return;
-    final entries = _pending[owner]!
-        .values
-        .expand((chapters) => chapters.values)
-        .indexed
-        .toList()
-      ..sort((a, b) {
-        final order = a.$2.updatedAt.compareTo(b.$2.updatedAt);
-        return order == 0 ? a.$1.compareTo(b.$1) : order;
-      });
-    for (final (_, value) in entries) {
+    // 上一轮的失败不能留到这一轮，否则一次网络抖动之后「立即同步」
+    // 会永远报同一个错误，看起来像同步功能坏了。
+    if (error != null) {
+      error = null;
+      _notify();
+    }
+    for (final value in _orderedPending(owner)) {
+      final bookId = value.bookId;
       if (!active()) return;
-      if (_conflicts[owner]?.containsKey(value.bookId) ?? false) continue;
-      if (!identical(
-          _pending[owner]![value.bookId]?.values.firstOrNull, value)) {
-        continue;
-      }
+      if (_conflicts[owner]?.containsKey(bookId) ?? false) continue;
+      // 同一本书离线期间可能横跨好几章，服务端按章节累计收听时长，
+      // 所以必须从旧到新逐条补传，最后一章才成为续播位置。
+      if (!identical(_earliestPending(owner, bookId), value)) continue;
       try {
-        final remote = await _remote(value.bookId);
+        final remote = await _remote(bookId);
         if (!active()) return;
-        final latest = _latestPending(owner, value.bookId);
+        final latest = _latestPending(owner, bookId);
         if (remote != null &&
             latest != null &&
             _remoteConflicts(owner, latest, remote)) {
-          _conflicts.putIfAbsent(owner, () => {})[value.bookId] = remote;
+          _conflicts.putIfAbsent(owner, () => {})[bookId] = remote;
           _notify();
           continue;
         }
         // 每次请求前再次核对账号和待上传快照，切服或新进度不能串到旧请求里。
-        if (!identical(
-            _pending[owner]![value.bookId]?.values.firstOrNull, value)) {
-          continue;
-        }
+        if (!identical(_earliestPending(owner, bookId), value)) continue;
         final response = await api.post('/api/progress', data: {
           'book_id': value.bookId,
           'chapter_id': value.chapterId,
@@ -396,29 +417,81 @@ class ListeningProgressSync extends ChangeNotifier {
         final accepted = ProgressItem.fromJson(
             ackData['book_id'] != null ? ackData : value.toJson());
         await _serialize(() async {
-          _acknowledged[owner]![value.bookId] = accepted;
+          _acknowledged[owner]![bookId] = accepted;
           _removePending(owner, value);
           await _persist(owner);
         });
-        error = null;
         _notify();
       } catch (failure) {
         if (!active()) return;
-        if (failure is DioException && failure.response?.statusCode == 409) {
-          final current = asMap(asMap(failure.response?.data)['current']);
-          if (current['book_id'] == value.bookId) {
-            _conflicts.putIfAbsent(owner, () => {})[value.bookId] =
-                ProgressItem.fromJson(current);
-            error = '其他设备已更新进度，请选择续播位置';
-            _notify();
-            continue;
-          }
-        }
-        error = failure.toString();
+        if (_settleRejected(owner, bookId, value, failure)) continue;
+        error = ApiError.messageFor(failure);
         _notify();
         return;
       }
     }
+  }
+
+  /// 所有待传记录，按记录时间从旧到新排列。
+  ///
+  /// 顺序要按时间而不是插入顺序：从本机缓存恢复时，两者的顺序未必一致。
+  List<PendingListeningProgress> _orderedPending(String owner) {
+    final entries = _pending[owner]!
+        .values
+        .expand((chapters) => chapters.values)
+        .indexed
+        .toList()
+      ..sort((a, b) {
+        final order = a.$2.updatedAt.compareTo(b.$2.updatedAt);
+        return order == 0 ? a.$1.compareTo(b.$1) : order;
+      });
+    return [for (final (_, value) in entries) value];
+  }
+
+  /// 移除一条仍然在队列里的待传记录。
+  void _removePending(String owner, PendingListeningProgress value) {
+    final books = _pending[owner];
+    final chapters = books?[value.bookId];
+    if (chapters == null) return;
+    if (!identical(chapters[value.chapterId], value)) return;
+    chapters.remove(value.chapterId);
+    if (chapters.isEmpty) books!.remove(value.bookId);
+  }
+
+  /// 处理一条「服务端不会再接受」的待传记录。
+  ///
+  /// 返回 true 表示已经处理完可以继续下一本。这类记录必须先摘掉：
+  /// 曲目重新扫描后章节 id 会变，云的旧书被删掉后整本书就没了，
+  /// 这些请求永远返回 400/404。此前它们会卡在队首，导致排队在后面的
+  /// 每一本书都传不上去，表现出来就是「进度同步一直失败」。
+  bool _settleRejected(String owner, String bookId,
+      PendingListeningProgress value, Object failure) {
+    final status =
+        failure is DioException ? failure.response?.statusCode : null;
+    if (status == 409) {
+      final current = asMap(asMap(
+          failure is DioException ? failure.response?.data : null)['current']);
+      if (current['book_id'] == bookId) {
+        _conflicts.putIfAbsent(owner, () => {})[bookId] =
+            ProgressItem.fromJson(current);
+        error = '其他设备已更新进度，请选择续播位置';
+        _notify();
+        return true;
+      }
+      return false;
+    }
+    if (status != 400 && status != 403 && status != 404) return false;
+    // 书或章节已经不存在、或已不属于当前账号，重试多少次都不会成功。
+    unawaited(_serialize(() async {
+      _pending[owner]?[bookId]
+          ?.removeWhere((_, item) => identical(item, value));
+      if (_pending[owner]?[bookId]?.isEmpty ?? false) {
+        _pending[owner]!.remove(bookId);
+      }
+      await _persist(owner);
+    }).catchError((Object _) {}));
+    _notify();
+    return true;
   }
 
   Future<ProgressItem?> resolve(String bookId,
