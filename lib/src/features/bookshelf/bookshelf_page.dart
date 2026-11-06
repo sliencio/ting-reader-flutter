@@ -39,6 +39,9 @@ class _BookshelfPageState extends State<BookshelfPage> {
   static const int _pageSize = 50;
 
   BookshelfState? _shelf;
+
+  /// 上一次刷新收听记录时正在播放的书，用来避免重复请求。
+  String? _recentProgressBookId;
   late final _serverRefresh = ServerRefreshBinding(
     visible: () => mounted && TickerMode.valuesOf(context).enabled,
     refresh: () async {
@@ -117,12 +120,24 @@ class _BookshelfPageState extends State<BookshelfPage> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (!TickerMode.valuesOf(context).enabled) _closeFilterMenu();
+    final visible = TickerMode.valuesOf(context).enabled;
+    if (!visible) _closeFilterMenu();
     final app = AppScope.appOf(context);
     _shelf ??= BookshelfState(app.api, cache: app.bookshelfCache)
       ..addListener(_shelfChanged);
     _serverRefresh.bind(AppScope.appOf(context).serverChanges);
     _serverRefresh.resume();
+    if (visible) _refreshRecentProgressIfNeeded();
+  }
+
+  /// 切回书架时（TickerMode 变化会触发这里）补一次收听记录，让刚听过的书
+  /// 立刻浮到最前面。只拉时间戳不重拉书单；没有播放内容或还是同一本书时
+  /// 直接跳过，避免来回切页产生重复请求（同一本书本来就已经在最前）。
+  void _refreshRecentProgressIfNeeded() {
+    final bookId = AppScope.playerOf(context).currentBook?.id;
+    if (bookId == null || bookId == _recentProgressBookId) return;
+    _recentProgressBookId = bookId;
+    unawaited(_shelf?.refreshRecentProgress() ?? Future.value());
   }
 
   void _shelfChanged() {

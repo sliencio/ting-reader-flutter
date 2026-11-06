@@ -43,55 +43,28 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
     return '$minutes:${secs.toString().padLeft(2, '0')}';
   }
 
+  /// 封面只是「理想尺寸」。竖屏手机上按视口高度留出控制区的空间，
+  /// 让常规尺寸的屏幕不必再触发整体缩放；真正放不下时由布局层兜底。
   Size _expandedCoverBounds({
-    required Size screenSize,
-    required EdgeInsets safePadding,
-    required double bottomContentPadding,
     required bool tightControls,
-    required double mainButtonSize,
-    required bool hasError,
+    required Size viewport,
   }) {
     final portraitPhone =
-        screenSize.height > screenSize.width && screenSize.width < 600;
+        viewport.height > viewport.width && viewport.width < 600;
     final squareMaxSize = tightControls ? 300.0 : 340.0;
     final baseMaxWidth = _coverShape == CoverShape.square
         ? squareMaxSize
         : (tightControls ? 280.0 : 320.0);
-    // Tall artwork shares the square cover's height budget on portrait phones.
-    final baseMaxHeight = _coverShape == CoverShape.square
+    var baseMaxHeight = _coverShape == CoverShape.square
         ? squareMaxSize
-        : (portraitPhone ? squareMaxSize : (tightControls ? 340.0 : 390.0));
-    if (!portraitPhone) return Size(baseMaxWidth, baseMaxHeight);
-
-    final afterCoverGap = tightControls ? 20.0 : 24.0;
-    final titleHeight = tightControls ? 32.0 : 36.0;
-    final quickActionGap = tightControls ? 16.0 : 20.0;
-    final sliderGap = tightControls ? 16.0 : 22.0;
-    final controlsGap = tightControls ? 20.0 : 26.0;
-    final errorHeight = hasError ? 72.0 : 0.0;
-    final reservedHeight = safePadding.top +
-        safePadding.bottom +
-        18 +
-        38 +
-        28 +
-        afterCoverGap +
-        titleHeight +
-        9 +
-        18 +
-        errorHeight +
-        quickActionGap +
-        63 +
-        sliderGap +
-        48 +
-        42 +
-        controlsGap +
-        mainButtonSize +
-        bottomContentPadding;
-    final availableCoverHeight = screenSize.height - reservedHeight;
-    final minCoverHeight = _coverShape == CoverShape.square ? 132.0 : 156.0;
-    final coverMaxHeight =
-        availableCoverHeight.clamp(minCoverHeight, baseMaxHeight).toDouble();
-    return Size(baseMaxWidth, coverMaxHeight);
+        : (tightControls ? 340.0 : 390.0);
+    if (portraitPhone) {
+      // 控制区（标题、快捷按钮、进度条、播放键）大约占 470 逻辑像素。
+      final minHeight = _coverShape == CoverShape.square ? 132.0 : 156.0;
+      baseMaxHeight =
+          (viewport.height - 470).clamp(minHeight, baseMaxHeight).toDouble();
+    }
+    return Size(baseMaxWidth, baseMaxHeight);
   }
 
   double _expandedBottomContentPadding({
@@ -170,13 +143,8 @@ class _ExpandedPlayerState extends State<_ExpandedPlayer> {
             safePadding: mediaPadding,
           );
           final coverBounds = _expandedCoverBounds(
-            screenSize: size,
-            safePadding: mediaPadding,
-            bottomContentPadding: bottomContentPadding,
             tightControls: tightControls,
-            mainButtonSize: mainButtonSize,
-            hasError: player.playbackStatus != null ||
-                player.progressSync.conflicts.isNotEmpty,
+            viewport: size,
           );
           final header = Row(
             children: [
@@ -553,35 +521,37 @@ class _ExpandedPlayerLayout extends StatelessWidget {
           // 按播放区域实际宽度分栏，侧栏展开和窗口缩放后也重新适配。
           final sideBySide = desktop && constraints.maxWidth >= 700;
           final padding = EdgeInsets.fromLTRB(22, 18, 22, bottomPadding);
-          return SingleChildScrollView(
+          final limit = sideBySide ? 1040.0 : 560.0;
+          final availableWidth =
+              (constraints.maxWidth - padding.horizontal).clamp(0.0, limit);
+          // 详情页不滚动：内容先按自然高度排一遍，放不下时整体等比缩小，
+          // 这样进度冲突、错误提示、系统大字体都不会把播放按钮顶出屏幕。
+          return Padding(
             padding: padding,
             child: Center(
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  maxWidth: sideBySide ? 1040 : 560,
-                  minHeight: desktop
-                      ? (constraints.maxHeight - padding.vertical)
-                          .clamp(0, double.infinity)
-                      : 0,
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    header,
-                    const SizedBox(height: 28),
-                    if (sideBySide)
-                      Row(children: [
-                        Expanded(flex: 4, child: Center(child: cover)),
-                        const SizedBox(width: 32),
-                        Expanded(flex: 5, child: controls),
-                      ])
-                    else ...[
-                      cover,
-                      SizedBox(height: coverGap),
-                      controls,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.center,
+                child: SizedBox(
+                  width: availableWidth,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      header,
+                      const SizedBox(height: 28),
+                      if (sideBySide)
+                        Row(children: [
+                          Expanded(flex: 4, child: Center(child: cover)),
+                          const SizedBox(width: 32),
+                          Expanded(flex: 5, child: controls),
+                        ])
+                      else ...[
+                        cover,
+                        SizedBox(height: coverGap),
+                        controls,
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),

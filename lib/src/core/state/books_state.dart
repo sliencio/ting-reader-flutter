@@ -833,6 +833,9 @@ class BookshelfState extends ChangeNotifier {
   String? _loadedIdentity;
   bool hasSnapshot = false;
 
+  /// 书籍 id → 最近一次收听时间，用于把正在听的书排到最前面。
+  Map<String, DateTime> _recentlyPlayed = const {};
+
   String get _identity => api.sessionIdentity?.call() ?? api.baseUrl;
 
   void _applySnapshot(Map<String, dynamic> snapshot) {
@@ -892,9 +895,10 @@ class BookshelfState extends ChangeNotifier {
       var library = (nextSettings['bookshelf_library_id'] ?? '').toString();
       if (!nextLibraries.any((item) => item.id == library)) library = '';
       final params = {if (library.isNotEmpty) 'library_id': library};
-      final results = await Future.wait([
+      final results = await Future.wait<dynamic>([
         api.get('/api/books', params: params, cancelToken: token),
         api.get('/api/v1/series', params: params, cancelToken: token),
+        _loadRecentProgress(token),
       ]);
       if (!active()) return;
       settings = {...nextSettings, 'bookshelf_library_id': library};
@@ -903,6 +907,9 @@ class BookshelfState extends ChangeNotifier {
       sortBy = (settings['bookshelf_sort_by'] ?? 'created_at').toString();
       books = asMapList(results[0].data).map(Book.fromJson).toList();
       series = asMapList(results[1].data).map(Series.fromJson).toList();
+      final recent = results[2] as List<ProgressItem>?;
+      // 收听记录拉取失败时保留上一次的排序依据，避免书架顺序来回跳动。
+      if (recent != null) _recentlyPlayed = _mapRecentlyPlayed(recent);
       hasSnapshot = true;
       // 只保存书架展示设置及媒体库名称，不缓存连接凭据和刮削配置。
       unawaited(_cache.write(identity, {
@@ -939,6 +946,16 @@ class BookshelfState extends ChangeNotifier {
   List<Book> get sortedBooks {
     final result = [...books];
     result.sort((a, b) {
+      // 最近在听的排最前：书架默认按「最近添加」排，但用户更关心接着听哪本，
+      // 所以正在听的那本书优先浮到最上面，其余保持原有排序。
+      final aRecent = recentlyPlayedAt(a.id);
+      final bRecent = recentlyPlayedAt(b.id);
+      if (aRecent != null || bRecent != null) {
+        if (aRecent == null) return 1;
+        if (bRecent == null) return -1;
+        final byRecency = bRecent.compareTo(aRecent);
+        if (byRecency != 0) return byRecency;
+      }
       if (sortBy == 'title') return compareChineseText(a.title, b.title);
       if (sortBy == 'author') {
         return compareChineseText(a.author ?? '', b.author ?? '');
@@ -948,6 +965,49 @@ class BookshelfState extends ChangeNotifier {
       final bd = DateTime.tryParse(b.createdAt ?? '') ?? DateTime(1970);
       return bd.compareTo(ad);
     });
+    return result;
+  }
+
+  /// 某本书最近一次收听的时间；没听过返回 null。
+  ///
+  /// 书架列表接口不返回收听时间，这里用 `/api/progress/recent` 的结果补上，
+  /// 加载失败时退化为只按原有排序，不影响书架可用性。
+  DateTime? recentlyPlayedAt(String bookId) => _recentlyPlayed[bookId];
+
+  /// 拉取最近收听记录。书架接口不返回收听时间，只能单独取一次；
+  /// 失败返回 null，表示「本次没拿到」，调用方保留上一次的排序依据。
+  Future<List<ProgressItem>?> _loadRecentProgress(CancelToken token) async {
+    try {
+      final response =
+          await api.get('/api/progress/recent', cancelToken: token);
+      return asMapList(response.data)
+          .map(ProgressItem.fromJson)
+          .where((item) => item.bookId.isNotEmpty)
+          .toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 只刷新收听时间，用于回到书架时更新「最近在听」的顺序。
+  /// 比整份书单重新拉取轻得多，失败时保留上一次结果。
+  Future<void> refreshRecentProgress() async {
+    if (_disposed) return;
+    final items = await _loadRecentProgress(CancelToken());
+    if (_disposed || items == null) return;
+    _recentlyPlayed = _mapRecentlyPlayed(items);
+    notifyListeners();
+  }
+
+  /// 同一本书可能有多条记录，取最新的那条。
+  Map<String, DateTime> _mapRecentlyPlayed(List<ProgressItem> items) {
+    final result = <String, DateTime>{};
+    for (final item in items) {
+      final at = DateTime.tryParse(item.updatedAt ?? '');
+      if (at == null) continue;
+      final current = result[item.bookId];
+      if (current == null || at.isAfter(current)) result[item.bookId] = at;
+    }
     return result;
   }
 
