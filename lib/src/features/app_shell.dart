@@ -443,8 +443,12 @@ class _AppShellState extends State<AppShell> {
     final appState = AppScope.appOf(context);
     final settingsOpen = _settingsOpen;
     final showBar = !player.isExpanded;
-    final barHeight = showBar ? 58.0 + bottomInset : 0.0;
-    final miniBottom = barHeight + (collapsedMini ? 20 : 12);
+    // 标签栏高度由它自己算（内容 58 加底部安全区），外壳只负责照它留位置。
+    // 分开各算一次会让安全区被计算两遍，内容与标签栏之间就空出一条。
+    final barHeight = showBar ? ShellBottomBar.heightWith(bottomInset) : 0.0;
+    // 迷你播放条紧贴标签栏上沿，中间不留空隙。安全区已经含在 barHeight
+    // 里，这里再加一次就会把播放条顶上去。
+    final miniBottom = barHeight;
     return Scaffold(
       body: Stack(
         children: [
@@ -531,6 +535,7 @@ class _AppShellState extends State<AppShell> {
                 current: navDestination,
                 settingsOpen: settingsOpen,
                 offline: appState.offlineMode,
+                bottomInset: bottomInset,
                 onSelect: (destination) {
                   if (destination == AppDestination.mine) {
                     _openSettings();

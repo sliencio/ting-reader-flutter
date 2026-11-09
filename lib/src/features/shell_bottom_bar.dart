@@ -15,12 +15,31 @@ class ShellBottomBar extends StatelessWidget {
     required this.settingsOpen,
     required this.offline,
     required this.onSelect,
+    this.bottomInset = 0,
   });
+
+  /// 图标与文字区域的高度，不含顶部细分隔线和底部安全区。
+  static const double contentHeight = 58;
+
+  /// 顶部分隔线的宽度。它画在容器内部，会把内容再往下挤这么多。
+  static const double topBorderWidth = 1;
+
+  /// 标签栏实际占用的高度：分隔线、内容、底部安全区。
+  ///
+  /// 外壳按这个值给内容区和迷你播放条留位置。此前外壳按「58 + 安全区」
+  /// 计算，而标签栏本身只有 58 外加 1px 分隔线，两者对不上，多出来的
+  /// 安全区就变成了内容与标签栏之间的一条空白，播放条也被顶得离标签栏很远。
+  static double heightWith(double bottomInset) =>
+      contentHeight + topBorderWidth + bottomInset;
 
   final AppDestination current;
   final bool settingsOpen;
   final bool offline;
   final ValueChanged<AppDestination> onSelect;
+
+  /// 底部安全区高度（手势条、Home 指示条）。背景铺到屏幕底边，图标与
+  /// 文字抬到安全区之上，避免压住系统手势区域。
+  final double bottomInset;
 
   @override
   Widget build(BuildContext context) {
@@ -55,6 +74,9 @@ class ShellBottomBar extends StatelessWidget {
         color: context.isDark ? AppColors.slate900 : Colors.white,
         border: Border(top: BorderSide(color: context.faintBorder)),
       ),
+      // 背景色和分隔线一直铺到屏幕底边，图标与文字则抬到底部安全区之上，
+      // 否则手势条会压住标签文字。
+      padding: EdgeInsets.only(bottom: bottomInset),
       child: Row(
         children: [
           for (final tab in visible)

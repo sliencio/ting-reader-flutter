@@ -865,6 +865,34 @@ void main() {
     });
   }
 
+  // 底部安全区曾被算了两遍：标签栏按 58 高绘制，外壳却按「58 + 安全区」
+  // 给内容留位、按同样方式抬高播放条，结果内容与标签栏之间空出一条，播放条
+  // 也被顶离标签栏。这里用 34px 的手势条模拟 iPhone 底部安全区锁住布局。
+  testWidgets('迷你播放条紧贴标签栏，底部安全区只计算一次', (tester) async {
+    const safeBottom = 34.0;
+    tester.view.padding = const FakeViewPadding(bottom: safeBottom);
+    addTearDown(tester.view.resetPadding);
+    final (_, player) = await _pump(tester, const Size(390, 844));
+    player.book = Book.fromJson({'id': 'book', 'title': '收听中的书籍'});
+    player.chapter = Chapter.fromJson({
+      'id': 'chapter',
+      'book_id': 'book',
+      'title': '当前章节',
+      'duration': 600,
+    });
+    player.notifyListeners();
+    await tester.pumpAndSettle();
+
+    final barRect = tester.getRect(find.byType(ShellBottomBar));
+    final miniRect = tester.getRect(find.byType(MiniPlayer));
+
+    // 标签栏占满「内容 58 + 安全区 34」，并一直铺到屏幕底边。
+    expect(barRect.height, ShellBottomBar.heightWith(safeBottom));
+    expect(barRect.bottom, 844);
+    // 播放条底边就是标签栏顶边，中间没有残留的空隙。
+    expect(miniRect.bottom, barRect.top);
+  });
+
   testWidgets('底部标签栏打开设置后高亮设置，左缘右滑可返回', (tester) async {
     await _pump(tester, const Size(390, 844));
     final shelf = tester.state(find.byType(BookshelfPage));
