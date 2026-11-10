@@ -1,0 +1,363 @@
+name: Rebuild desktop releases
+
+# 只重建桌面端（Windows / macOS / Linux），把新产物替换到已有的发布上，
+# 发布说明、版本标签以及 Android / iOS 附件都保持原样。
+#
+# 和 release.yml 的区别：那边是「发一个新版本」，会校验版本号递增、
+# 读取 CHANGELOG、建新标签并上传全部平台。这里针对的是「代码改了但版本
+# 号不变，只想重出桌面安装包」，所以不碰标签、不碰说明，并且默认只动桌面
+# 三件套，其余附件逐个比对确认未变。
+on:
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: '要替换附件的发布标签，例如 v1.5.6；留空则按 pubspec.yaml 的版本号推导'
+        type: string
+        required: false
+        default: ''
+      source_ref:
+        description: '构建用的 git ref；留空时填了发布标签就用该标签，否则用当前分支（一般是 main）'
+        type: string
+        required: false
+        default: ''
+      windows:
+        description: '重建 Windows 安装包（TingReader-windows-x64-setup.exe）'
+        type: boolean
+        default: true
+      macos:
+        description: '重建 macOS 应用包（TingReader-macos.zip）'
+        type: boolean
+        default: true
+      linux:
+        description: '重建 Linux 压缩包（TingReader-linux-x64.tar.gz）'
+        type: boolean
+        default: true
+      skip_tests:
+        description: '跳过格式、分析与测试检查（仅在你确信代码无误时勾选）'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: republish-desktop-${{ inputs.release_tag || github.ref }}
+  cancel-in-progress: false
+
+env:
+  PUB_HOSTED_URL: https://pub.dev
+  FLUTTER_VERSION: "3.47.0"
+  # 构建用的 ref 对三个平台必须一致，否则产物来自不同代码。
+  SOURCE_REF: ${{ inputs.source_ref || inputs.release_tag || github.ref }}
+
+jobs:
+  prepare:
+    name: 解析发布目标
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      commit: ${{ steps.resolve.outputs.commit }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_ref || inputs.release_tag || github.ref }}
+          fetch-depth: 0
+      - name: 核对标签与源码版本
+        id: resolve
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          INPUT_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version: \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)+.*/\1/p' pubspec.yaml)"
+          if [ -z "$VERSION" ]; then
+            echo "::error::无法从 pubspec.yaml 读取 version，格式应为 x.y.z+n"
+            exit 1
+          fi
+          TAG="${INPUT_TAG:-v$VERSION}"
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::发布标签格式应为 vX.Y.Z，当前为 $TAG"
+            exit 1
+          fi
+          # 标签与源码版本必须是同一个版本，否则安装包会顶着旧版本号装着新代码。
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::标签 $TAG 与 pubspec.yaml 的版本 $VERSION 不一致；请让二者对齐再重建"
+            exit 1
+          fi
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "::error::发布 $TAG 不存在。要发新版本请用 release.yml，这里只做补发。"
+            exit 1
+          fi
+          COMMIT="$(git rev-parse HEAD)"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "commit=$COMMIT" >> "$GITHUB_OUTPUT"
+          PLATFORMS=()
+          if [ "${{ inputs.windows }}" = "true" ]; then PLATFORMS+=("Windows"); fi
+          if [ "${{ inputs.macos }}" = "true" ]; then PLATFORMS+=("macOS"); fi
+          if [ "${{ inputs.linux }}" = "true" ]; then PLATFORMS+=("Linux"); fi
+          if [ "${#PLATFORMS[@]}" -eq 0 ]; then
+            echo "::error::至少选择一个要重建的平台"
+            exit 1
+          fi
+          {
+            echo "### 重建桌面端"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 发布标签 | \`$TAG\` |"
+            echo "| 应用版本 | \`$VERSION\` |"
+            echo "| 源码提交 | \`$COMMIT\` |"
+            echo "| 平台 | ${PLATFORMS[*]} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  verify:
+    name: 代码检查
+    needs: prepare
+    if: inputs.skip_tests != true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze --no-fatal-infos
+      - run: flutter test --no-pub
+
+  windows:
+    name: Windows 安装包
+    needs: [prepare, verify]
+    if: >-
+      always() && needs.prepare.result == 'success' && inputs.windows == true &&
+      (needs.verify.result == 'success' || needs.verify.result == 'skipped')
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - name: 构建 Windows 应用
+        shell: pwsh
+        env:
+          CMAKE_GENERATOR: Visual Studio 17 2022
+          BUILD_NAME: ${{ needs.prepare.outputs.version }}
+        run: |
+          flutter build windows --release --build-name $env:BUILD_NAME --build-number $env:GITHUB_RUN_NUMBER
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y --no-progress
+      - name: 生成安装程序
+        shell: pwsh
+        env:
+          BUILD_NAME: ${{ needs.prepare.outputs.version }}
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          $env:TING_READER_VERSION = $env:BUILD_NAME
+          $env:TING_READER_BUILD_DIR = (Resolve-Path "build/windows/x64/runner/Release").Path
+          $env:TING_READER_OUTPUT_DIR = (Resolve-Path "dist").Path
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "windows/installer/ting_reader.iss"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-windows
+          path: dist/*
+          if-no-files-found: error
+
+  macos:
+    name: macOS 应用包
+    needs: [prepare, verify]
+    if: >-
+      always() && needs.prepare.result == 'success' && inputs.macos == true &&
+      (needs.verify.result == 'success' || needs.verify.result == 'skipped')
+    runs-on: macos-26
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+      - name: 检查 Apple 编译工具链
+        run: |
+          xcodebuild -version
+          xcrun swift --version
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - name: 构建 macOS 应用
+        env:
+          BUILD_NAME: ${{ needs.prepare.outputs.version }}
+        run: |
+          flutter build macos --release \
+            --build-name "$BUILD_NAME" \
+            --build-number "$GITHUB_RUN_NUMBER"
+      - name: 检查 Mac 签名权限、架构及启动
+        run: |
+          shopt -s nullglob
+          apps=(build/macos/Build/Products/Release/*.app)
+          test "${#apps[@]}" -eq 1
+          bash scripts/verify_macos_app.sh "${apps[0]}" --smoke
+      - name: 压缩应用包
+        run: |
+          mkdir -p dist
+          ditto -c -k --sequesterRsrc --keepParent \
+            build/macos/Build/Products/Release/*.app dist/TingReader-macos.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-macos
+          path: dist/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux 压缩包
+    needs: [prepare, verify]
+    if: >-
+      always() && needs.prepare.result == 'success' && inputs.linux == true &&
+      (needs.verify.result == 'success' || needs.verify.result == 'skipped')
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+      - run: sudo apt-get update -qq
+        timeout-minutes: 5
+      - name: 安装 Linux 构建依赖
+        run: |
+          sudo apt-get install -y --no-install-recommends \
+            clang cmake ninja-build pkg-config \
+            libgtk-3-dev liblzma-dev libsecret-1-dev \
+            libwebkit2gtk-4.1-dev
+        timeout-minutes: 10
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - name: 构建 Linux 应用
+        env:
+          BUILD_NAME: ${{ needs.prepare.outputs.version }}
+        run: |
+          flutter build linux --release \
+            --build-name "$BUILD_NAME" \
+            --build-number "$GITHUB_RUN_NUMBER"
+      - name: 打包
+        run: |
+          mkdir -p dist
+          tar -C build/linux/x64/release/bundle -czf dist/TingReader-linux-x64.tar.gz .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-linux
+          path: dist/*
+          if-no-files-found: error
+
+  publish:
+    name: 替换桌面端附件
+    needs: [prepare, verify, windows, macos, linux]
+    # 只要有平台成功就发布成功的那些；全部失败或任一失败则整体停下，
+    # 免得半新半旧地混进同一个发布。
+    if: >-
+      always() && needs.prepare.result == 'success' &&
+      needs.windows.result != 'failure' && needs.windows.result != 'cancelled' &&
+      needs.macos.result != 'failure' && needs.macos.result != 'cancelled' &&
+      needs.linux.result != 'failure' && needs.linux.result != 'cancelled' &&
+      needs.verify.result != 'failure' && needs.verify.result != 'cancelled' &&
+      (needs.windows.result == 'success' || needs.macos.result == 'success' ||
+       needs.linux.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SOURCE_REF }}
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: 收集本次要替换的附件
+        id: collect
+        env:
+          WINDOWS: ${{ needs.windows.result }}
+          MACOS: ${{ needs.macos.result }}
+          LINUX: ${{ needs.linux.result }}
+        run: |
+          set -euo pipefail
+          FILES=()
+          if [ "$WINDOWS" = "success" ]; then FILES+=(TingReader-windows-x64-setup.exe); fi
+          if [ "$MACOS" = "success" ]; then FILES+=(TingReader-macos.zip); fi
+          if [ "$LINUX" = "success" ]; then FILES+=(TingReader-linux-x64.tar.gz); fi
+          if [ "${#FILES[@]}" -eq 0 ]; then
+            echo "::error::没有任何平台构建成功，无可发布的附件"
+            exit 1
+          fi
+          for file in "${FILES[@]}"; do
+            if [ ! -s "dist/$file" ]; then
+              echo "::error::缺少构建产物 dist/$file"
+              exit 1
+            fi
+          done
+          printf '%s\n' "${FILES[@]}" > files.txt
+          echo "将替换：${FILES[*]}"
+      - name: 记录替换前的其余附件
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXCLUDE="$(jq -R . < files.txt | jq -s .)"
+          gh release view "$TAG" --json name,body,assets > before.json
+          jq --argjson ex "$EXCLUDE" \
+            '{name, body, assets: [.assets[] | select(.name as $n | ($ex | index($n)) | not) | {name, size, state}] | sort_by(.name)}' \
+            before.json > before-filtered.json
+      - name: 上传并覆盖桌面端附件
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mapfile -t FILES < files.txt
+          for file in "${FILES[@]}"; do
+            gh release upload "$TAG" "dist/$file" --clobber
+          done
+      - name: 核对其余附件未被改动
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXCLUDE="$(jq -R . < files.txt | jq -s .)"
+          gh release view "$TAG" --json name,body,assets > after.json
+          jq --argjson ex "$EXCLUDE" \
+            '{name, body, assets: [.assets[] | select(.name as $n | ($ex | index($n)) | not) | {name, size, state}] | sort_by(.name)}' \
+            after.json > after-filtered.json
+          if ! diff -u before-filtered.json after-filtered.json; then
+            echo "::error::发布说明或非桌面端附件在本次重建中被改动，请检查"
+            exit 1
+          fi
+          echo "发布说明与其余附件均未变动。"
+      - name: 汇总
+        env:
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          COMMIT: ${{ needs.prepare.outputs.commit }}
+        run: |
+          set -euo pipefail
+          mapfile -t FILES < files.txt
+          {
+            echo "### 已替换桌面端附件"
+            echo ""
+            echo "发布：\`$TAG\`（$COMMIT）"
+            echo ""
+            for file in "${FILES[@]}"; do
+              echo "- \`$file\` — $(du -h "dist/$file" | cut -f1)"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
