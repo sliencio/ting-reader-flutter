@@ -236,9 +236,7 @@ extension _PlayerPlayback on PlayerState {
       // 起播前还要读设置、准备音源，先切到加载态，按钮立刻转圈。
       _connectingPlayback = true;
       _notifyIfActive();
-    }
-    await _prepareSmartResume();
-    if (shouldStart) {
+      await _prepareSmartResume();
       final atEnd = _audio.processingState == audio.ProcessingState.completed;
       final intro = _introPositionFor(currentBook!, currentChapter!);
       await playChapter(currentBook!, chapters, currentChapter!,
@@ -256,8 +254,16 @@ extension _PlayerPlayback on PlayerState {
     // 用户手动操作，清除睡眠定时设置的自动暂停标记。
     _suppressAutoPlay = false;
     if (_audio.playing) {
+      // 先反馈再等原生暂停：pause() 要走一次平台通道，图标若等它返回
+      // 才切换，点下去会有一段时间看着没反应。失败时下面的播放流回调
+      // 会把状态改回去。
+      if (isPlaying) {
+        isPlaying = false;
+        _notifyIfActive();
+      }
       await _audio.pause();
-      await sendProgress();
+      // 播放流回调已经触发过一次 sendProgress，这里不再重复等待。
+      unawaited(sendProgress());
     } else {
       await _playWithSession();
       _startProgressTimer();

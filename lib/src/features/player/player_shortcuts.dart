@@ -9,6 +9,12 @@ import '../../shared/app_scope.dart';
 /// 媒体键在 Windows 上既可能以按键事件到达，也可能经 WM_APPCOMMAND 转成
 /// [DesktopWindow.mediaCommand] 到达，因此按下后短时间内重复的同名指令会被
 /// 丢弃，避免一次按键触发两次播放/暂停。
+///
+/// 按键走 [HardwareKeyboard] 的全局处理器，而不是 `CallbackShortcuts`：
+/// 后者挂在焦点链上，只有当前有焦点节点时才收得到事件。窗口在后台失焦后，
+/// Flutter 会把焦点收回到根 scope；重新激活时如果没有节点主动要焦点，
+/// 焦点就是空的，于是快捷键要先把窗口点一下才生效。全局处理器不依赖焦点，
+/// 窗口处于前台就能响应。
 class PlayerShortcuts extends StatefulWidget {
   const PlayerShortcuts({super.key, required this.child});
 
@@ -28,10 +34,12 @@ class _PlayerShortcutsState extends State<PlayerShortcuts> {
   void initState() {
     super.initState();
     DesktopWindow.instance.mediaCommand = _handleCommand;
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     if (DesktopWindow.instance.mediaCommand == _handleCommand) {
       DesktopWindow.instance.mediaCommand = null;
     }
@@ -54,12 +62,42 @@ class _PlayerShortcutsState extends State<PlayerShortcuts> {
     return editing;
   }
 
-  void _handleCommand(String command) {
-    final now = DateTime.now();
-    final last = _lastHandled[command];
-    if (last != null && now.difference(last) < _duplicateWindow) return;
-    _lastHandled[command] = now;
+  /// 把按键映射成播放指令；返回 null 表示这个键与播放无关。
+  String? _commandFor(LogicalKeyboardKey key) => switch (key) {
+        LogicalKeyboardKey.space => 'playPause',
+        LogicalKeyboardKey.mediaPlayPause => 'playPause',
+        LogicalKeyboardKey.mediaTrackNext => 'next',
+        LogicalKeyboardKey.mediaTrackPrevious => 'previous',
+        LogicalKeyboardKey.arrowRight => 'forward',
+        LogicalKeyboardKey.arrowLeft => 'rewind',
+        _ => null,
+      };
 
+  /// 只在按下时触发一次；KeyUp 与长按重复不重复执行。
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+    final command = _commandFor(event.logicalKey);
+    if (command == null) return false;
+    // 空格和方向键在输入框里要照常输入；媒体键不受此限制。
+    final isMediaKey = event.logicalKey == LogicalKeyboardKey.mediaPlayPause ||
+        event.logicalKey == LogicalKeyboardKey.mediaTrackNext ||
+        event.logicalKey == LogicalKeyboardKey.mediaTrackPrevious;
+    if (!isMediaKey && _editingText) return false;
+    if (!AppScope.playerOf(context).hasChapter) return false;
+    // 去重只针对媒体键：它在 Windows 上会同时以按键事件和 WM_APPCOMMAND
+    // 两份到达，必须合并。空格与方向键只有一个来源，去重反而会把用户
+    // 连着按的第二下吞掉。
+    _handleCommand(command, dedupe: isMediaKey);
+    return true;
+  }
+
+  void _handleCommand(String command, {bool dedupe = true}) {
+    if (dedupe) {
+      final now = DateTime.now();
+      final last = _lastHandled[command];
+      if (last != null && now.difference(last) < _duplicateWindow) return;
+      _lastHandled[command] = now;
+    }
     final player = AppScope.playerOf(context);
     if (!player.hasChapter) return;
     switch (command) {
@@ -80,33 +118,6 @@ class _PlayerShortcutsState extends State<PlayerShortcuts> {
     }
   }
 
-  void _guarded(VoidCallback action) {
-    if (_editingText) return;
-    action();
-  }
-
   @override
-  Widget build(BuildContext context) {
-    return CallbackShortcuts(
-      bindings: {
-        const SingleActivator(LogicalKeyboardKey.space): () =>
-            _guarded(() => _handleCommand('playPause')),
-        const SingleActivator(LogicalKeyboardKey.mediaPlayPause): () =>
-            _handleCommand('playPause'),
-        const SingleActivator(LogicalKeyboardKey.mediaTrackNext): () =>
-            _handleCommand('next'),
-        const SingleActivator(LogicalKeyboardKey.mediaTrackPrevious): () =>
-            _handleCommand('previous'),
-        const SingleActivator(LogicalKeyboardKey.arrowRight): () =>
-            _guarded(() => _handleCommand('forward')),
-        const SingleActivator(LogicalKeyboardKey.arrowLeft): () =>
-            _guarded(() => _handleCommand('rewind')),
-      },
-      child: Focus(
-        autofocus: true,
-        skipTraversal: true,
-        child: widget.child,
-      ),
-    );
-  }
+  Widget build(BuildContext context) => widget.child;
 }

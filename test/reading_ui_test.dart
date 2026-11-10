@@ -33,6 +33,7 @@ import 'package:ting_reader_flutter/src/shared/app_scope.dart';
 import 'package:ting_reader_flutter/src/shared/cards/book_card.dart';
 import 'package:ting_reader_flutter/src/shared/cards/bookshelf_list_tile.dart';
 import 'package:ting_reader_flutter/src/shared/common/media_widgets.dart';
+import 'package:ting_reader_flutter/src/features/player/player_shortcuts.dart';
 import 'package:ting_reader_flutter/src/shared/common/common_widgets.dart';
 import 'package:ting_reader_flutter/src/shared/filter/display_filter_menu.dart';
 import 'package:ting_reader_flutter/src/shared/dialogs/text_input_dialog.dart';
@@ -2070,4 +2071,41 @@ void main() {
       expect(tester.takeException(), isNull);
     });
   }
+
+  // 快捷键此前挂在 CallbackShortcuts 上，只有焦点链上存在节点时才收得到
+  // 按键。窗口在后台失焦后 Flutter 把焦点收回根 scope，重新激活时若无节点
+  // 要焦点就是空的，于是必须先点一下窗口快捷键才生效。改用全局
+  // HardwareKeyboard 处理器后，焦点为空也应照常响应。
+  testWidgets('快捷键在没有焦点时也能触发播放控制', (tester) async {
+    final app = _ReadingApp();
+    final player = _ReadingPlayer()
+      ..currentBook = book
+      ..currentChapter = chapter;
+    addTearDown(app.dispose);
+    addTearDown(player.dispose);
+    await _pump(
+        tester, app, player, const PlayerShortcuts(child: SizedBox.expand()));
+
+    // 主动清空焦点，模拟窗口重新激活后的状态。
+    FocusManager.instance.primaryFocus?.unfocus();
+    await tester.pumpAndSettle();
+    expect(FocusManager.instance.primaryFocus?.context?.widget,
+        isNot(isA<EditableText>()));
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(player.resumeCalls, 1);
+    expect(player.isPlaying, isFalse);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.pumpAndSettle();
+    expect(player.resumeCalls, 2);
+    expect(player.isPlaying, isTrue);
+
+    final before = player.seekCalls;
+    await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+    await tester.pumpAndSettle();
+    expect(player.seekCalls, before + 1);
+    expect(tester.takeException(), isNull);
+  });
 }

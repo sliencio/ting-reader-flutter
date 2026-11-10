@@ -190,6 +190,10 @@ void FlutterWindow::SetWindowMode(const std::string& mode) {
   RECT bounds;
   GetWindowRect(window, &bounds);
   const auto dpi = GetDpiForWindow(window);
+  // 先记下新模式：SetWindowPos 会触发 WM_GETMINMAXINFO，那里按
+  // window_mode_ 决定最小尺寸。若此时还留着旧模式，从小窗切到小小窗会
+  // 按小窗的 420x142 当最小值，把 300x66 的小小窗撑大；来回切换就会越切越大。
+  window_mode_ = leaving_compact ? std::string() : mode;
   if (leaving_compact) {
     SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
@@ -200,5 +204,4 @@ void FlutterWindow::SetWindowMode(const std::string& mode) {
                  MulDiv(micro ? 300 : 560, dpi, 96),
                  MulDiv(micro ? 66 : 156, dpi, 96), SWP_SHOWWINDOW);
   }
-  window_mode_ = leaving_compact ? std::string() : mode;
 }
