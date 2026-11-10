@@ -258,11 +258,16 @@ extension _PlayerPlayback on PlayerState {
       // 才切换，点下去会有一段时间看着没反应。失败时下面的播放流回调
       // 会把状态改回去。
       if (isPlaying) {
+        // 播放流回调靠 isPlaying 仍是 true 才记下暂停时刻；这里提前改了状态，
+        // 就得自己补上，否则手动暂停后再播放不会触发智能回退。
+        _pausedAt = DateTime.now();
+        _pausedChapterId = currentChapter?.id;
         isPlaying = false;
         _notifyIfActive();
       }
       await _audio.pause();
-      // 播放流回调已经触发过一次 sendProgress，这里不再重复等待。
+      // 本地记录此时已经很小，重复写一次不到几毫秒；播放流没回调时
+      // 这里就是唯一的保底，宁可多写也不能丢掉暂停位置。
       unawaited(sendProgress());
     } else {
       await _playWithSession();

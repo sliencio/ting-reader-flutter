@@ -1,8 +1,7 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../models/models.dart';
+import 'account_document_store.dart';
 
 class PlaybackResumeRecord {
   const PlaybackResumeRecord(
@@ -76,13 +75,19 @@ class PlaybackResumeRecord {
 }
 
 class PlaybackResumeStore {
+  /// 续播记录内嵌整份章节列表，体积按书规模可达几百 KB，
+  /// 放在偏好表里会让每次键值写入都重排整张表，因此单独存成文件。
+  PlaybackResumeStore({AccountDocumentStore? store})
+      : _store = store ?? AccountDocumentStore();
+
+  final AccountDocumentStore _store;
+
   String _key(String identity) =>
       'playback_resume:${base64Url.encode(utf8.encode(identity))}';
 
   Future<PlaybackResumeRecord?> read(String identity) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_key(identity));
+      final raw = await _store.read(_key(identity));
       if (raw == null) return null;
       final record = PlaybackResumeRecord.fromJson(asMap(jsonDecode(raw)));
       if (record.book.id.isEmpty ||
@@ -98,8 +103,7 @@ class PlaybackResumeStore {
 
   Future<void> write(String identity, PlaybackResumeRecord record) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_key(identity), jsonEncode(record.toJson()));
+      await _store.write(_key(identity), jsonEncode(record.toJson()));
     } catch (_) {
       // 本地存储失败不影响播放和服务端进度同步。
     }
