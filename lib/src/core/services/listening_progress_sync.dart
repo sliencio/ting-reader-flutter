@@ -4,11 +4,11 @@ import 'dart:math';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/api_client.dart';
 import '../api/api_error.dart';
 import '../models/models.dart';
+import 'account_document_store.dart';
 
 class PendingListeningProgress {
   const PendingListeningProgress(
@@ -63,10 +63,18 @@ class ListeningSyncReport {
 
 class ListeningProgressSync extends ChangeNotifier {
   ListeningProgressSync(
-      {required this.api, required this.identity, required this.canSync});
+      {required this.api,
+      required this.identity,
+      required this.canSync,
+      AccountDocumentStore? documentStore})
+      : _documentStore = documentStore ?? AccountDocumentStore();
   final ApiClient api;
   final String Function() identity;
   final bool Function() canSync;
+
+  /// 待传进度与设备号都是随播放不断改写的文档，放进偏好表会让桌面端每次
+  /// 写入都重编码整张表，因此单独存文件。
+  final AccountDocumentStore _documentStore;
   final Map<String, Map<String, _PendingChapters>> _pending = {};
   final Map<String, Map<String, ProgressItem>> _acknowledged = {};
   final Map<String, Map<String, ProgressItem>> _conflicts = {};
@@ -140,17 +148,17 @@ class ListeningProgressSync extends ChangeNotifier {
 
   Future<void> _load(String owner) async {
     if (_pending.containsKey(owner)) return;
-    final prefs = await SharedPreferences.getInstance();
-    _deviceId ??= prefs.getString('listening_device_id');
+    _deviceId ??= await _documentStore.read('listening_device_id');
     if (_deviceId == null) {
       _deviceId = base64Url
           .encode(List.generate(24, (_) => Random.secure().nextInt(256)));
-      await prefs.setString('listening_device_id', _deviceId!);
+      await _documentStore.write('listening_device_id', _deviceId!);
     }
     final items = <String, _PendingChapters>{};
     final ack = <String, ProgressItem>{};
     try {
-      final json = asMap(jsonDecode(prefs.getString(_key(owner)) ?? '{}'));
+      final raw = await _documentStore.read(_key(owner));
+      final json = asMap(jsonDecode(raw ?? '{}'));
       for (final value in asMapList(json['pending'])) {
         final item = PendingListeningProgress.fromJson(value);
         if (item.position.isFinite &&
@@ -188,8 +196,7 @@ class ListeningProgressSync extends ChangeNotifier {
   }
 
   Future<void> _persist(String owner) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(
+    await _documentStore.write(
         _key(owner),
         jsonEncode({
           'pending': _pending[owner]!

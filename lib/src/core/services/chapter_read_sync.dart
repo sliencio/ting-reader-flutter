@@ -3,10 +3,10 @@ import 'dart:convert';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../api/api_client.dart';
 import '../api/api_error.dart';
+import 'account_document_store.dart';
 import 'chapter_read_marks.dart';
 
 class ChapterReadSync extends ChangeNotifier {
@@ -14,12 +14,17 @@ class ChapterReadSync extends ChangeNotifier {
       {required this.api,
       required this.identity,
       required this.canSync,
-      this.onSynced});
+      this.onSynced,
+      AccountDocumentStore? documents})
+      : _documents = documents ?? AccountDocumentStore();
 
   final ApiClient api;
   final String Function() identity;
   final bool Function() canSync;
   final void Function(String book, Set<String> chapters)? onSynced;
+
+  /// 已读记录按书累积，越用越大，放进偏好表会拖慢每一次键值写入。
+  final AccountDocumentStore _documents;
   final Map<String, Set<String>> _pending = {};
   final Map<String, Set<String>> _confirmed = {};
   Future<void> _tail = Future.value();
@@ -57,10 +62,9 @@ class ChapterReadSync extends ChangeNotifier {
 
   Future<void> _load(String owner) async {
     if (_owner == owner) return;
-    final prefs = await SharedPreferences.getInstance();
     _pending.clear();
     _confirmed.clear();
-    final rawPending = prefs.getString(_key(owner));
+    final rawPending = await _documents.read(_key(owner));
     if (rawPending != null) {
       for (final entry
           in (jsonDecode(rawPending) as Map<String, dynamic>).entries) {
@@ -69,7 +73,7 @@ class ChapterReadSync extends ChangeNotifier {
     }
     // 已同步成功的记录同样落盘：章节列表接口不一定回填 is_read，
     // 只靠内存保存会让重装或重启后的已读标记凭空消失。
-    final rawConfirmed = prefs.getString(_confirmedKey(owner));
+    final rawConfirmed = await _documents.read(_confirmedKey(owner));
     if (rawConfirmed != null) {
       for (final entry
           in (jsonDecode(rawConfirmed) as Map<String, dynamic>).entries) {
@@ -81,20 +85,22 @@ class ChapterReadSync extends ChangeNotifier {
   }
 
   Future<void> _save(String owner) async {
-    final prefs = await SharedPreferences.getInstance();
-    final pendingSaved = await prefs.setString(
-        _key(owner),
-        jsonEncode({
-          for (final entry in _pending.entries)
-            if (entry.value.isNotEmpty) entry.key: entry.value.toList()..sort(),
-        }));
-    final confirmedSaved = await prefs.setString(
-        _confirmedKey(owner),
-        jsonEncode({
-          for (final entry in _confirmed.entries)
-            if (entry.value.isNotEmpty) entry.key: entry.value.toList()..sort(),
-        }));
-    if (!pendingSaved || !confirmedSaved) {
+    try {
+      await _documents.write(
+          _key(owner),
+          jsonEncode({
+            for (final entry in _pending.entries)
+              if (entry.value.isNotEmpty)
+                entry.key: entry.value.toList()..sort(),
+          }));
+      await _documents.write(
+          _confirmedKey(owner),
+          jsonEncode({
+            for (final entry in _confirmed.entries)
+              if (entry.value.isNotEmpty)
+                entry.key: entry.value.toList()..sort(),
+          }));
+    } catch (_) {
       throw StateError('保存章节已读记录失败');
     }
   }

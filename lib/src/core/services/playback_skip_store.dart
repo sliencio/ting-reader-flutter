@@ -1,8 +1,7 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
-
 import '../models/book.dart';
+import 'account_document_store.dart';
 
 class PlaybackSkipSettings {
   const PlaybackSkipSettings(this.intro, this.outro);
@@ -14,6 +13,10 @@ class PlaybackSkipSettings {
 }
 
 class PlaybackSkipStore {
+  PlaybackSkipStore({AccountDocumentStore? documents})
+      : _documents = documents ?? AccountDocumentStore();
+
+  final AccountDocumentStore _documents;
   final _cache = <String, PlaybackSkipSettings?>{};
 
   String _key(String identity, String bookId) =>
@@ -28,8 +31,7 @@ class PlaybackSkipStore {
   Future<PlaybackSkipSettings?> read(String identity, String bookId) async {
     final key = _key(identity, bookId);
     if (_cache.containsKey(key)) return _cache[key];
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getString(key);
+    final raw = await _documents.read(key);
     PlaybackSkipSettings? settings;
     if (raw != null) {
       try {
@@ -54,11 +56,9 @@ class PlaybackSkipStore {
     if (settings.intro < 0 || settings.outro < 0) {
       throw ArgumentError('Skip durations must not be negative');
     }
-    final prefs = await SharedPreferences.getInstance();
     final key = _key(identity, bookId);
-    final saved = await prefs.setString(
+    await _documents.write(
         key, jsonEncode({'intro': settings.intro, 'outro': settings.outro}));
-    if (!saved) throw StateError('Could not save local playback settings');
     _cache[key] = settings;
   }
 }

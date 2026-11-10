@@ -1,8 +1,14 @@
 import 'dart:convert';
 
-import 'package:shared_preferences/shared_preferences.dart';
+import 'account_document_store.dart';
 
 class BookshelfCache {
+  BookshelfCache({AccountDocumentStore? documents})
+      : _documents = documents ?? AccountDocumentStore();
+
+  /// 书架快照带全部书与系列，通常几十 KB，放在偏好表里会拖慢每一次键值写入。
+  final AccountDocumentStore _documents;
+
   final _snapshots = <String, Map<String, dynamic>>{};
 
   Map<String, dynamic>? peek(String identity) => _snapshots[identity];
@@ -36,8 +42,7 @@ class BookshelfCache {
     final memory = peek(identity);
     if (memory != null) return memory;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_key(identity));
+      final raw = await _documents.read(_key(identity));
       if (raw == null) return null;
       final value = jsonDecode(raw);
       if (value is! Map<String, dynamic> ||
@@ -58,8 +63,7 @@ class BookshelfCache {
   Future<void> write(String identity, Map<String, dynamic> snapshot) async {
     _remember(identity, snapshot);
     try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_key(identity), jsonEncode(snapshot));
+      await _documents.write(_key(identity), jsonEncode(snapshot));
     } catch (_) {
       // 本地缓存失败不影响已经加载的书架。
     }

@@ -2,12 +2,12 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../api/api_client.dart';
 import '../api/api_error.dart';
 import '../models/models.dart';
 import '../utils/chapter_sort.dart';
 import '../utils/formatters.dart';
+import '../services/account_document_store.dart';
 import '../services/bookshelf_cache.dart';
 
 /// Pending chapter edits, shared filtering and the exact batch write payload.
@@ -280,6 +280,12 @@ typedef _BookDetailSnapshot = ({
 });
 
 class BookDetailsCache {
+  BookDetailsCache({AccountDocumentStore? documents})
+      : _documents = documents ?? AccountDocumentStore();
+
+  /// 缓存里存几十本书的章节列表与设置，体积可观，不该占着偏好表。
+  final AccountDocumentStore _documents;
+
   final _entries = <String, _BookDetailSnapshot>{};
   int revision = 0;
   static const _storageKey = 'book_details_cache_v1';
@@ -291,8 +297,7 @@ class BookDetailsCache {
   Future<void> _restoreDisk() async {
     final generation = revision;
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final raw = prefs.getString(_storageKey);
+      final raw = await _documents.read(_storageKey);
       if (raw == null || generation != revision) return;
       final savedEntries = asMap(jsonDecode(raw)).entries.toList();
       for (final entry in savedEntries.reversed.take(24).toList().reversed) {
@@ -369,8 +374,7 @@ class BookDetailsCache {
         },
     });
     _saving = _saving.then((_) async {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString(_storageKey, snapshot);
+      await _documents.write(_storageKey, snapshot);
     }).catchError((Object _) {
       // Do not interrupt browsing on disk failure.
     });
