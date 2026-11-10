@@ -68,7 +68,10 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
       _recordChapterStartIfPlaying();
       _recordChapterMiddleIfNeeded();
       _handleSkipOutro();
-      if (DateTime.now().difference(_lastResumeSave).inSeconds >= 5) {
+      // 续播记录只在内存里更新，落盘由 playChapter/pause/退出统一触发。
+      // 以前这里每 5 秒写一次，每次都要序列化整份章节列表，纯粹是白花。
+      if (DateTime.now().difference(_lastResumeSave) >=
+          const Duration(seconds: 15)) {
         _lastResumeSave = DateTime.now();
         unawaited(_saveResumeRecord());
       }

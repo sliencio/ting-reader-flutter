@@ -51,6 +51,32 @@ class AccountDocumentStore {
     return File('${directory.path}${Platform.pathSeparator}${_fileName(key)}');
   }
 
+  /// 把所有以 [prefixes] 开头的旧键从偏好表搬进文件。
+  ///
+  /// 必须主动跑一次，不能等某个键被用到才迁移：桌面端每次写偏好都会重编码
+  /// 整张表，只要还有一条十几 MB 的旧记录躺在里面，其他键的任何写入都要
+  /// 跟着付这笔钱。启动后尽快搬完，才能让后续写入立刻变便宜。
+  Future<void> migrateLegacy(Iterable<String> prefixes) async {
+    final directory = await _ensureDirectory();
+    if (directory == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      for (final key in prefs.getKeys()) {
+        if (!prefixes.any(key.startsWith)) continue;
+        final value = prefs.getString(key);
+        if (value == null) continue;
+        final file = await _file(key);
+        if (file != null) {
+          if (!await file.exists()) await _writeFile(file, value);
+          // 文件已经落盘（或已存在）才删旧键，避免中途失败丢数据。
+          await prefs.remove(key);
+        }
+      }
+    } catch (_) {
+      // 迁移失败不影响使用，下次启动继续尝试。
+    }
+  }
+
   Future<String?> read(String key) async {
     final file = await _file(key);
     if (file == null) return _legacy(key);

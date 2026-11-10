@@ -16,6 +16,7 @@ import 'src/core/utils/locale.dart';
 import 'src/features/app_shell.dart';
 import 'src/shared/app_scope.dart';
 import 'src/shared/common/common_widgets.dart';
+import 'src/core/services/account_document_store.dart';
 import 'src/core/services/desktop_window.dart';
 import 'src/features/player/desktop_window_host.dart';
 import 'src/features/player/mini_player.dart';
@@ -95,6 +96,11 @@ Future<void> main() async {
 
   final appState = AppState();
   await DesktopWindow.instance.initialize(appState);
+  // 旧版本把进度保护点和续播记录放在偏好表里，桌面端每次写偏好都会重编码
+  // 整张表，一条十几 MB 的记录就足以让播放期间每两秒卡一次。启动后立刻搬走，
+  // 别等第一次播放时才迁移。
+  unawaited(AccountDocumentStore()
+      .migrateLegacy(['playback_checkpoints:', 'playback_resume:']));
   DesktopWindow.instance.onCloseRequested = () => _handleWindowClose(appState);
   DesktopWindow.instance.onExitRequested = () async {
     final context = _appNavigatorKey.currentContext;

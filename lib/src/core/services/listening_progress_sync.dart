@@ -73,6 +73,11 @@ class ListeningProgressSync extends ChangeNotifier {
   Future<void> _writes = Future<void>.value();
   Future<void>? _flushing;
   bool _disposed = false;
+  Timer? _persistTimer;
+
+  /// 合并落盘的等待时间。太短起不到合并作用，太长则进程被强杀时丢的位置
+  /// 会变多；一秒左右既能吃掉上报风暴，丢的也只是最后这一秒。
+  static const _persistDelay = Duration(seconds: 1);
   String? error;
   String? _deviceId;
   bool versioned(String book) =>
@@ -165,6 +170,21 @@ class ListeningProgressSync extends ChangeNotifier {
     _pending[owner] = items;
     _acknowledged[owner] = ack;
     _notify();
+  }
+
+  /// 合并短时间内的多次记录，延迟落盘。
+  ///
+  /// 服务端上报按秒级频率发生，每次都落一次盘纯属浪费：位置本身在内存里
+  /// 已经最新，真正需要持久化的只是「进程被杀后还能补传」。因此改动先记在
+  /// 内存，隔一小段时间再写一次；期间再有改动就重新计时。
+  void _persistSoon(String owner) {
+    if (_disposed) return;
+    _persistTimer?.cancel();
+    _persistTimer = Timer(_persistDelay, () {
+      _persistTimer = null;
+      if (_disposed) return;
+      unawaited(_serialize(() => _persist(owner)));
+    });
   }
 
   Future<void> _persist(String owner) async {
@@ -295,7 +315,8 @@ class ListeningProgressSync extends ChangeNotifier {
           unsyncedSince: previous?.unsyncedSince ??
               previous?.updatedAt ??
               value.updatedAt);
-      await _persist(owner);
+      // 纯内存里已经是最新位置，落盘合并做即可；flush/dispose 会保证写出去。
+      _persistSoon(owner);
       _notify();
     });
   }
@@ -538,6 +559,15 @@ class ListeningProgressSync extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    final timer = _persistTimer;
+    _persistTimer = null;
+    if (timer != null && timer.isActive) {
+      // 退出前把攒下的改动落到磁盘，否则刚听的位置会丢。
+      timer.cancel();
+      for (final owner in _pending.keys) {
+        unawaited(_persist(owner));
+      }
+    }
     super.dispose();
   }
 }
