@@ -193,8 +193,8 @@ extension _AppStateCredentials on AppState {
       record = {
         'password':
             await _secureStorage.read(key: '$key.tr') ?? profile.password,
-        'fnos_password': await _secureStorage.read(key: '$key.fnos') ??
-            profile.fnosPassword,
+        'fnos_password':
+            await _secureStorage.read(key: '$key.fnos') ?? profile.fnosPassword,
         'cookie': profile.gatewayCookie,
         'access_code': profile.fnAccessCode,
       };

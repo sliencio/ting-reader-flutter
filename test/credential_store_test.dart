@@ -208,8 +208,7 @@ void main() {
   });
 
   for (final discardWrites in [false, true]) {
-    test('迁移写入失败不打断启动并保留偏好表旧值 (discard: $discardWrites)',
-        () async {
+    test('迁移写入失败不打断启动并保留偏好表旧值 (discard: $discardWrites)', () async {
       final legacy = _legacyValues();
       SharedPreferences.setMockInitialValues(legacy);
       final state =
