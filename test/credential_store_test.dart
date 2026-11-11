@@ -59,6 +59,48 @@ class _FailedStorage extends FlutterSecureStorage {
   }
 }
 
+class _UnavailableStorage extends FlutterSecureStorage {
+  const _UnavailableStorage();
+
+  // 覆盖安装换了签名、或设备刚启动还没解锁时，钥匙串会对所有调用报错。
+  @override
+  Future<String?> read({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async =>
+      throw StateError('Keychain unavailable');
+
+  @override
+  Future<void> write({
+    required String key,
+    required String? value,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async =>
+      throw StateError('Keychain unavailable');
+
+  @override
+  Future<void> delete({
+    required String key,
+    AppleOptions? iOptions,
+    AndroidOptions? aOptions,
+    LinuxOptions? lOptions,
+    WebOptions? webOptions,
+    AppleOptions? mOptions,
+    WindowsOptions? wOptions,
+  }) async =>
+      throw StateError('Keychain unavailable');
+}
+
 class _DeleteFailureStorage extends FlutterSecureStorage {
   bool failDeletes = false;
 
@@ -166,18 +208,22 @@ void main() {
   });
 
   for (final discardWrites in [false, true]) {
-    test('failed migration keeps old values (discard: $discardWrites)',
+    test('迁移写入失败不打断启动并保留偏好表旧值 (discard: $discardWrites)',
         () async {
       final legacy = _legacyValues();
       SharedPreferences.setMockInitialValues(legacy);
       final state =
           AppState(secureStorage: _FailedStorage(discardWrites: discardWrites));
-      await expectLater(state.initialize(), throwsStateError);
+      // 钥匙串写不进去只是「这次没迁移成功」，不该让整个启动流程失败：
+      // 一旦抛出，启动页会跳回登录页，用户看到的就是账号全没了。
+      await state.initialize();
+      addTearDown(state.dispose);
+      expect(state.token, 'old-token');
+      expect(state.savedServers, hasLength(1));
       final prefs = await SharedPreferences.getInstance();
       for (final entry in legacy.entries) {
         expect(prefs.get(entry.key), entry.value);
       }
-      state.dispose();
     });
   }
 
@@ -303,5 +349,32 @@ void main() {
     expect(restarted.theme, 'dark');
     expect(restarted.settings['player_volume'], 0.35);
     expect(restarted.token, isNull);
+  });
+
+  test('回归_钥匙串不可用时已保存的服务器地址和账号不能丢', () async {
+    final legacy = _legacyValues();
+    // 真实装机的索引是用 toJson()（不含密码）写回去的，密码只在钥匙串里。
+    final profile = SavedServerProfile.fromJson(
+      (jsonDecode(legacy['saved_servers'] as String) as List).single
+          as Map<String, dynamic>,
+    );
+    legacy['saved_servers'] = jsonEncode([profile.toJson()]);
+    SharedPreferences.setMockInitialValues(legacy);
+    // 覆盖安装换了签名后钥匙串整体拒绝访问，密码读不出来是正常的；
+    // 但地址和用户名存在偏好表里，绝不能跟着一起消失。
+    final state = AppState(secureStorage: const _UnavailableStorage());
+    await state.initialize();
+    addTearDown(state.dispose);
+
+    expect(state.savedServers, hasLength(1));
+    final restored = state.savedServers.single;
+    expect(restored.serverUrl, 'https://reader.example');
+    expect(restored.username, 'reader');
+    // 密码没读回来，标出来让登录页直接要求补填，而不是拿空密码去试。
+    expect(restored.password, isEmpty);
+
+    // 偏好表里的原始索引不能被结果覆盖，否则下次启动就真的没了。
+    final prefs = await SharedPreferences.getInstance();
+    expect(prefs.getString('saved_servers'), legacy['saved_servers']);
   });
 }

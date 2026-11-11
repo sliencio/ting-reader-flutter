@@ -57,6 +57,8 @@ class _LoginPageState extends State<LoginPage> {
     if (!appState.needsGatewayLogin) return;
     final profile = appState.savedGatewayProfile;
     if (profile == null) return;
+    // 密码取不回来时自动登录必然失败，列表页已经能点开补填，别抢先弹窗。
+    if (profile.password.isEmpty) return;
     _automaticGatewayLoginStarted = true;
     // The marker is set only after the cached gateway session has failed
     // validation. Do not send that same stale cookie once more; go straight
@@ -72,6 +74,13 @@ class _LoginPageState extends State<LoginPage> {
     SavedServerProfile profile, {
     String? fnAccessCode,
   }) async {
+    // 钥匙串读不出来时（换签名覆盖安装、设备刚启动未解锁），地址和用户名
+    // 还在，密码却是空的。拿空密码去登录只会换回一个「密码错误」，不如直接
+    // 打开编辑框让用户补填。
+    if (profile.password.isEmpty) {
+      await _openServerDialog(profile);
+      return;
+    }
     await _login(
       server: profile.serverUrl,
       localServer: profile.localServerUrl,

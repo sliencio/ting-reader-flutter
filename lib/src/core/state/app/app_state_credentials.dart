@@ -35,7 +35,15 @@ extension _AppStateCredentials on AppState {
       return;
     }
     final key = _prefs?.getString(_sessionScopePrefsKey) ?? _sessionSecretKey();
-    var record = await _credentials.read(key);
+    Map<String, String>? record;
+    try {
+      record = await _credentials.read(key);
+    } catch (_) {
+      // 钥匙串暂时不可用时按「没有会话」处理即可：走登录页重新登录，但
+      // 已保存的服务器列表不受影响，地址和用户名都还在偏好表里。
+      record = null;
+    }
+    var legacySecretsMigrated = true;
     if (record == null) {
       final legacyToken = _prefs?.getString('auth_token');
       final legacyCookie = _prefs?.getString(AppState._gatewayCookiePrefsKey);
@@ -44,13 +52,22 @@ extension _AppStateCredentials on AppState {
           'token': legacyToken ?? '',
           'cookie': legacyCookie ?? '',
         };
-        await _credentials.write(key, record);
-        await _prefs?.setString(_sessionScopePrefsKey, key);
+        try {
+          await _credentials.write(key, record);
+          await _prefs?.setString(_sessionScopePrefsKey, key);
+        } catch (_) {
+          // 钥匙串写不进去时（换签名覆盖安装、设备尚未解锁）保留偏好表里的
+          // 明文副本，下次启动再迁移一次。这里不能往外抛：启动流程一旦失败
+          // 就会跳回登录页，而登录页空着列表正是用户以为账号丢了的原因。
+          legacySecretsMigrated = false;
+        }
       }
     }
     // Leave old values untouched if writing/verification throws.
-    await _prefs?.remove('auth_token');
-    await _prefs?.remove(AppState._gatewayCookiePrefsKey);
+    if (legacySecretsMigrated) {
+      await _prefs?.remove('auth_token');
+      await _prefs?.remove(AppState._gatewayCookiePrefsKey);
+    }
     token = _nonEmptyCredential(record?['token']);
     gatewayCookie = _nonEmptyCredential(record?['cookie']);
   }
@@ -108,7 +125,11 @@ extension _AppStateCredentials on AppState {
   String? _nonEmptyCredential(String? value) =>
       value == null || value.isEmpty ? null : value;
 
-  Future<List<SavedServerProfile>> _loadSavedServers() async {
+  /// 只解析偏好表里的服务器索引，不碰钥匙串。
+  ///
+  /// 地址和用户名本来就以明文存在偏好表里，密码在钥匙串。钥匙串读不出来时
+  /// 也要能拿回这几条记录，否则用户会看到服务器「全部消失」。
+  List<SavedServerProfile> _readSavedServersFromPrefs() {
     final raw = _prefs?.getString('saved_servers');
     if (raw == null || raw.isEmpty) return const [];
     final Object? decoded;
@@ -118,20 +139,42 @@ extension _AppStateCredentials on AppState {
       return const [];
     }
     if (decoded is! List) return const [];
-    final profiles = decoded
-        .map((item) => SavedServerProfile.fromJson(asMap(item)))
-        .where((item) =>
-            item.serverUrl.isNotEmpty || item.localServerUrl.isNotEmpty)
-        .toList();
-    final hydrated = <SavedServerProfile>[];
-    // 索引里的每个 profile 都要依次访问钥匙串。iOS 上钥匙串调用是同步 IPC，
+    final profiles = <SavedServerProfile>[];
+    for (final item in decoded) {
+      try {
+        final profile = SavedServerProfile.fromJson(asMap(item));
+        if (profile.serverUrl.isNotEmpty || profile.localServerUrl.isNotEmpty) {
+          profiles.add(profile);
+        }
+      } catch (_) {
+        // 单条记录坏掉不该连累其它服务器，跳过它继续解析。
+      }
+    }
+    return profiles;
+  }
+
+  Future<List<SavedServerProfile>> _loadSavedServers() async {
+    final profiles = _readSavedServersFromPrefs();
+    if (profiles.isEmpty) return const [];
+    // 索引里的每个 profile 都要访问钥匙串。iOS 上钥匙串调用是同步 IPC，
     // 逐个 await 请求会叠加成明显的启动延迟，所以并发读取。
-    final results = await Future.wait(
-      profiles.map(_hydrateServerProfileSecrets),
-    );
-    hydrated.addAll(results);
-    // Only remove inline secrets after every profile has been migrated.
-    await _persistSavedServers(hydrated);
+    //
+    // 任何一条读取失败都只影响它自己的密码，不能掀翻整份列表：覆盖安装换了
+    // 签名、或设备刚启动还没解锁时钥匙串会整体拒绝访问，以前这里会把
+    // savedServers 变成空列表，下次保存服务器时再把这张空表写回偏好表，
+    // 用户的地址和账号就永久没了。
+    var allHydrated = true;
+    final hydrated = await Future.wait([
+      for (final profile in profiles)
+        _hydrateServerProfileSecrets(profile).catchError((Object _) {
+          allHydrated = false;
+          return profile;
+        }),
+    ]);
+    // Only rewrite the index when every profile migrated cleanly. During a
+    // keychain outage the inline legacy secrets may still be the only copy,
+    // so leave the stored index untouched rather than dropping them.
+    if (allHydrated) await _persistSavedServers(hydrated);
     return hydrated;
   }
 
@@ -139,20 +182,31 @@ extension _AppStateCredentials on AppState {
     SavedServerProfile profile,
   ) async {
     final key = _serverProfileSecretKey(profile);
-    var record = await _credentials.read('$key.credentials');
-    if (record == null) {
+    // 这里的任何失败都交给 _loadSavedServers 统一处理：它会保留偏好表里的
+    // 原始索引不写回，否则带内联密码的旧记录会被无密码版本覆盖掉。
+    final Map<String, String> record;
+    final stored = await _credentials.read('$key.credentials');
+    if (stored != null) {
+      record = stored;
+    } else {
+      // 旧版本把密码拆成两个散键存在钥匙串里，读到后统一搬进整条记录。
       record = {
         'password':
             await _secureStorage.read(key: '$key.tr') ?? profile.password,
-        'fnos_password':
-            await _secureStorage.read(key: '$key.fnos') ?? profile.fnosPassword,
+        'fnos_password': await _secureStorage.read(key: '$key.fnos') ??
+            profile.fnosPassword,
         'cookie': profile.gatewayCookie,
         'access_code': profile.fnAccessCode,
       };
       await _credentials.write('$key.credentials', record);
     }
-    await _secureStorage.delete(key: '$key.tr');
-    await _secureStorage.delete(key: '$key.fnos');
+    try {
+      // 确认整条记录已经可读，才清掉旧的散键。
+      await _secureStorage.delete(key: '$key.tr');
+      await _secureStorage.delete(key: '$key.fnos');
+    } catch (_) {
+      // 清理失败只会留下几个无用的旧键，不影响已经读到的密码。
+    }
     return profile.copyWith(
       password: record['password'] ?? '',
       fnosPassword: record['fnos_password'] ?? '',
