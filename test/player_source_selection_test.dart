@@ -146,6 +146,7 @@ class _NativeAudio {
   _NativeAudio(this.binding);
   final TestWidgetsFlutterBinding binding;
   final sources = <Map<dynamic, dynamic>>[];
+  final insertedSources = <Map<dynamic, dynamic>>[];
   final initialPositions = <int?>[];
   final initialIndices = <int>[];
   final seeks = <Map<dynamic, dynamic>>[];
@@ -228,6 +229,11 @@ class _NativeAudio {
               throw PlatformException(code: '4', message: 'Unsupported WMA');
             }
             return {'duration': reportedDuration.inMicroseconds};
+          }
+          if (request.method == 'concatenatingInsertAll') {
+            final args = request.arguments as Map;
+            insertedSources.addAll((args['children'] as List).cast<Map>());
+            return <String, dynamic>{};
           }
           return <String, dynamic>{};
         });
@@ -1679,6 +1685,22 @@ void main() {
     expect(native.activeUri.queryParameters['seek'], '42');
     expect(player.isPlaying, isTrue);
     expect(player.error, isNull);
+  });
+
+  test('首次起播只装载当前章节附近的窗口，不把整本书塞进原生队列', () async {
+    // 书有 500 章，从第 250 章起播。整本书入队时 iOS 会为每一章同步创建
+    // AVPlayerItem，这正是「点播放卡很久」的来源，所以这里锁住窗口行为。
+    final items = [
+      for (var index = 0; index < 500; index++)
+        chapter('/data/chapter$index.mp3', id: 'c$index', index: index),
+    ];
+    await player.playChapter(book, items, items[250]);
+
+    final loaded = native.sources.single['children'] as List;
+    expect(loaded.length, lessThan(50), reason: '原生队列应当只装载当前章节附近的一段');
+    expect(native.initialIndices.single, 2, reason: '当前章节在窗口内的偏移量应当作为初始下标');
+    expect(player.chapters, hasLength(500), reason: '章节列表本身不受窗口影响');
+    expect(player.currentChapter?.id, 'c250');
   });
 
   test('ordinary native queues still advance without reloading', () async {

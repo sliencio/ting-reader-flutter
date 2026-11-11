@@ -419,11 +419,13 @@ extension _PlayerPlayback on PlayerState {
     final book = currentBook;
     if (chapter == null || book == null || chapters.isEmpty) return;
     final index = chapters.indexWhere((item) => item.id == chapter.id);
+    // 目标章必须已经在原生队列里，否则下标换算成负数，seek 会落到别的章上。
     if (!_usingTranscodeStream &&
         _usingAudioQueue &&
         _audio.hasNext &&
         index >= 0 &&
         index < chapters.length - 1 &&
+        _inQueue(index + 1) &&
         !_failedQueueChapters.contains(chapters[index + 1].id)) {
       await _seekAudioQueueToChapter(index + 1, book, chapters[index + 1]);
       _advancingFromOutro = false;
@@ -453,6 +455,7 @@ extension _PlayerPlayback on PlayerState {
         _usingAudioQueue &&
         _audio.hasPrevious &&
         index > 0 &&
+        _inQueue(index - 1) &&
         !_failedQueueChapters.contains(chapters[index - 1].id)) {
       await _seekAudioQueueToChapter(index - 1, book, chapters[index - 1]);
       return;
@@ -496,20 +499,21 @@ extension _PlayerPlayback on PlayerState {
     _applyingQueueStartSeek = true;
     try {
       final position = Duration(milliseconds: (start * 1000).round());
-      if (_audio.currentIndex != index) {
-        await _audio.seek(position, index: index);
+      final nativeIndex = _nativeIndexOf(index);
+      if (_audio.currentIndex != nativeIndex) {
+        await _audio.seek(position, index: nativeIndex);
       }
       if (start > 0) {
         // Android 与桌面后端切章时可能仍在加载；此时 seek 会被忽略。
         // 等目标章就绪后单独定位，不把上一章的乐观位置当成定位成功。
         await _audio.playbackEventStream
             .firstWhere((event) =>
-                event.currentIndex == index &&
+                event.currentIndex == nativeIndex &&
                 event.processingState == audio.ProcessingState.ready)
             .timeout(const Duration(seconds: 15));
         if (!_isActivePlay(playGeneration, chapter.id) ||
             seekGeneration != _seekGeneration ||
-            _audio.currentIndex != index) {
+            _audio.currentIndex != nativeIndex) {
           return;
         }
         await _audio.seek(position);
@@ -519,24 +523,35 @@ extension _PlayerPlayback on PlayerState {
     }
   }
 
-  void _syncChapterFromAudioIndex(int? index) {
+  void _syncChapterFromAudioIndex(int? nativeIndex) {
     if (!_usingAudioQueue) return;
-    if (index == null || index < 0 || index >= chapters.length) return;
+    if (nativeIndex == null || nativeIndex < 0) return;
+    // 原生队列只装载了当前章节附近的一段，先把它换回章节下标。
+    final chapterIndex = nativeIndex + _queueOffset;
+    if (chapterIndex < 0 || chapterIndex >= chapters.length) return;
     final previousIndex = _currentChapterIndex;
-    for (var candidate = previousIndex + 1; candidate <= index; candidate++) {
+    for (var candidate = previousIndex + 1;
+        candidate <= chapterIndex;
+        candidate++) {
       if (candidate >= 0 &&
           _failedQueueChapters.contains(chapters[candidate].id)) {
         unawaited(_recoverQueueChapter(chapters[candidate]));
         return;
       }
     }
-    final nextChapter = chapters[index];
+    final nextChapter = chapters[chapterIndex];
+    if (currentChapter?.id != nextChapter.id) {
+      // 快走到窗口末尾时补上后面一段，原生队列才不会提前用完。
+      if (_queueOffset + _queueCount - chapterIndex <= 2) {
+        unawaited(_extendAudioQueue());
+      }
+    }
     if (currentChapter?.id == nextChapter.id) return;
     final sleepEnd = _sleep.episodes == 1 ? _listeningSnapshot() : null;
     final book = currentBook;
     final outro = book?.skipOutro ?? 0;
     if (previousIndex >= 0 &&
-        index == previousIndex + 1 &&
+        chapterIndex == previousIndex + 1 &&
         duration > 0 &&
         _furthestChapterPosition >= duration - outro - 2) {
       _recordChapterFinished();
@@ -552,10 +567,10 @@ extension _PlayerPlayback on PlayerState {
     _usingTranscodeStream = false;
     _advancingFromOutro = false;
     final queue = _audio.audioSource;
-    final source =
-        queue is audio.ConcatenatingAudioSource && index < queue.children.length
-            ? queue.children[index]
-            : null;
+    final source = queue is audio.ConcatenatingAudioSource &&
+            nativeIndex < queue.children.length
+        ? queue.children[nativeIndex]
+        : null;
     usingLocalFile =
         source is audio.UriAudioSource && source.uri.scheme == 'file';
     _updateListeningCache();
@@ -591,10 +606,10 @@ extension _PlayerPlayback on PlayerState {
       Future<void>(() async {
         if (!_isActivePlay(playGeneration, nextChapter.id) ||
             seekGeneration != _seekGeneration ||
-            _audio.currentIndex != index) {
+            _audio.currentIndex != nativeIndex) {
           return;
         }
-        await _seekAudioQueueToChapter(index, book, nextChapter);
+        await _seekAudioQueueToChapter(chapterIndex, book, nextChapter);
       }).catchError((Object failure) {
         if (_isActivePlay(playGeneration, nextChapter.id)) {
           _handleNativePlaybackError(failure);
@@ -657,12 +672,13 @@ extension _PlayerPlayback on PlayerState {
             ? failure.details
             : null;
     final index = details is Map ? details['index'] : null;
+    final chapterIndex = index is int ? index + _queueOffset : null;
     if (_audio.audioSource is audio.ConcatenatingAudioSource &&
         !_usingTranscodeStream &&
-        index is int &&
-        index >= 0 &&
-        index < chapters.length) {
-      final failedChapter = chapters[index];
+        chapterIndex != null &&
+        chapterIndex >= 0 &&
+        chapterIndex < chapters.length) {
+      final failedChapter = chapters[chapterIndex];
       _failedQueueChapters.add(failedChapter.id);
       // 预加载后续章节失败时，先让当前章节继续播放。
       if (failedChapter.id != currentChapter?.id) return;

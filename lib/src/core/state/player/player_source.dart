@@ -35,10 +35,13 @@ extension _PlayerSources on PlayerState {
     final queue = _audio.audioSource;
     if (queue is! audio.ConcatenatingAudioSource ||
         index < 0 ||
-        index >= queue.children.length) {
+        index >= chapters.length ||
+        !_inQueue(index)) {
       return false;
     }
-    final source = queue.children[index];
+    final nativeIndex = _nativeIndexOf(index);
+    if (nativeIndex < 0 || nativeIndex >= queue.children.length) return false;
+    final source = queue.children[nativeIndex];
     final expected = localPath == null
         ? Uri.parse(streamUrl(chapter.id))
         : Uri.file(localPath);
@@ -46,7 +49,7 @@ extension _PlayerSources on PlayerState {
     try {
       // 音源和鉴权未变时直接切换队列索引，不重新加载整本书。
       await _audio.seek(Duration(milliseconds: (position * 1000).round()),
-          index: index);
+          index: nativeIndex);
       return true;
     } catch (_) {
       // 原生后端不支持队列跳转时，回退到原有的音源加载流程。
@@ -224,31 +227,94 @@ extension _PlayerSources on PlayerState {
   }) async {
     final authRevision = appState.api.authRevision;
     final headers = _streamHeaders;
-    // 逐章串行 await 本地文件检查，整本书上千章时纯等待就要上百毫秒，
-    // 起播前这段等待用户能直接感觉到。这里一次并发问完。
+    // 只把当前章节附近的一段装进原生队列。整本书一次性入队时，iOS 会为
+    // 每一章同步创建 AVPlayerItem，1700 章的书首次起播要等上千次对象创建，
+    // 这才是「点播放很久才出声」的来源；后续章节靠 _extendAudioQueue 在
+    // 播放过程中追加。
+    final windowStart =
+        max(0, initialIndex - PlayerState._chaptersBeforeCurrentIndex);
+    final windowEnd = min(
+      chapterList.length,
+      initialIndex + 1 + PlayerState._chaptersAfterCurrentIndex,
+    );
+    final window = chapterList.sublist(windowStart, windowEnd);
     final localPaths = await Future.wait([
-      for (final chapter in chapterList)
+      for (final chapter in window)
         _localFilePathFromChapter(chapter) == null
             ? downloadState.localPathForChapter(chapter.id)
             : Future.value(_localFilePathFromChapter(chapter)),
     ]);
     final sources = <audio.AudioSource>[
-      for (var index = 0; index < chapterList.length; index++)
+      for (var index = 0; index < window.length; index++)
         audio.AudioSource.uri(
           localPaths[index] == null
-              ? Uri.parse(streamUrl(chapterList[index].id))
+              ? Uri.parse(streamUrl(window[index].id))
               : Uri.file(localPaths[index]!),
           headers:
               localPaths[index] == null && headers.isNotEmpty ? headers : null,
-          tag: _mediaItemFor(book, chapterList[index], index: index),
+          tag: _mediaItemFor(
+            book,
+            window[index],
+            index: windowStart + index,
+          ),
         ),
     ];
+    ++_queueRevision;
+    _queueOffset = windowStart;
+    _queueCount = window.length;
     await _audio.setAudioSource(
       audio.ConcatenatingAudioSource(children: sources),
-      initialIndex: initialIndex,
+      initialIndex: initialIndex - windowStart,
       initialPosition: initialPosition,
     );
     _mediaAuthRevision = authRevision;
+  }
+
+  /// 当前章节快走完窗口时，把后面一段章节补进原生队列。
+  ///
+  /// 补章要串行：并发的 insertAll 会让原生队列下标错位。整体重建队列时会
+  /// 递增 [_queueRevision]，这里据此丢弃过期的补章结果。
+  Future<void> _extendAudioQueue() {
+    final revision = _queueRevision;
+    final next = _queueAppend.then((_) async {
+      if (_disposed || revision != _queueRevision || !_usingAudioQueue) return;
+      final book = currentBook;
+      if (book == null) return;
+      final queue = _audio.audioSource;
+      if (queue is! audio.ConcatenatingAudioSource) return;
+      final remaining = chapters.length - (_queueOffset + _queueCount);
+      if (remaining <= 0) return;
+      final take = min(remaining, PlayerState._chaptersAfterCurrentIndex);
+      final start = _queueOffset + _queueCount;
+      final batch = chapters.sublist(start, start + take);
+      final headers = _streamHeaders;
+      final localPaths = await Future.wait([
+        for (final chapter in batch)
+          _localFilePathFromChapter(chapter) == null
+              ? downloadState.localPathForChapter(chapter.id)
+              : Future.value(_localFilePathFromChapter(chapter)),
+      ]);
+      if (_disposed || revision != _queueRevision) return;
+      final sources = <audio.AudioSource>[
+        for (var index = 0; index < batch.length; index++)
+          audio.AudioSource.uri(
+            localPaths[index] == null
+                ? Uri.parse(streamUrl(batch[index].id))
+                : Uri.file(localPaths[index]!),
+            headers: localPaths[index] == null && headers.isNotEmpty
+                ? headers
+                : null,
+            tag: _mediaItemFor(book, batch[index], index: start + index),
+          ),
+      ];
+      await queue.addAll(sources);
+      if (revision != _queueRevision) return;
+      _queueCount += take;
+    });
+    _queueAppend = next.catchError((Object failure) {
+      debugPrint('追加播放队列失败：$failure');
+    });
+    return _queueAppend;
   }
 
   Map<String, String> get _streamHeaders {

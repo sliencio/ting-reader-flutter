@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show max, min;
 
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart' as audio_session;
@@ -58,7 +59,8 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
     _positionSub = _audio.positionStream.listen((position) {
       if (_audio.audioSource == null) return;
       if (_suppressPositionUpdates || _applyingQueueStartSeek) return;
-      if (_usingAudioQueue && _audio.currentIndex != _currentChapterIndex) {
+      if (_usingAudioQueue &&
+          _audio.currentIndex != _nativeIndexOf(_currentChapterIndex)) {
         return;
       }
       currentTime = _displayTimeForAudioPosition(position);
@@ -253,6 +255,29 @@ class PlayerState extends ChangeNotifier with WidgetsBindingObserver {
   bool _usingTranscodeStream = false;
   bool _usingAudioQueue = false;
   bool _usingGatewaySingleChapterSource = false;
+  // 原生播放队列只装载当前章节前后的一小段，而不是整本书。
+  //
+  // iOS 的 just_audio 会同步解码队列里的每一项，每个音频源在构造时就创建
+  // AVPlayerItem。1700 章的书等于首次起播要同步创建 1700 个 AVPlayerItem，
+  // 用户点下去到出声之间就卡在那里；缓存与否无关，开销只跟章节数成正比。
+  static const int _chaptersBeforeCurrentIndex = 2;
+  static const int _chaptersAfterCurrentIndex = 10;
+
+  /// 首个入队章节在 [chapters] 中的下标。
+  int _queueOffset = 0;
+
+  /// 当前原生队列包含的章节数。
+  int _queueCount = 0;
+
+  /// 队列被整体重建时递增，用来丢弃过期的增量补章结果。
+  int _queueRevision = 0;
+  Future<void> _queueAppend = Future<void>.value();
+
+  bool _inQueue(int chapterIndex) =>
+      chapterIndex >= _queueOffset && chapterIndex < _queueOffset + _queueCount;
+
+  /// 章节下标换算成原生队列下标；队列外的结果没有意义，先用 [_inQueue] 判断。
+  int _nativeIndexOf(int chapterIndex) => chapterIndex - _queueOffset;
   bool _suppressPositionUpdates = false;
   bool _applyingQueueStartSeek = false;
   final Set<String> _failedQueueChapters = {};
