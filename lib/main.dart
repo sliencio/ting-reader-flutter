@@ -17,6 +17,7 @@ import 'src/features/app_shell.dart';
 import 'src/shared/app_scope.dart';
 import 'src/shared/common/common_widgets.dart';
 import 'src/core/services/account_document_store.dart';
+import 'src/core/services/client_update_service.dart';
 import 'src/core/services/desktop_window.dart';
 import 'src/features/player/desktop_window_host.dart';
 import 'src/features/player/mini_player.dart';
@@ -113,6 +114,8 @@ Future<void> main() async {
   };
   final downloadState = DownloadState(appState);
   final playerState = PlayerState(appState, downloadState);
+  // 构建号只在「关于」页展示，读一次缓存即可，不必阻塞启动。
+  unawaited(ClientUpdateService.loadBuildNumber());
 
   runApp(
     AppScope(
@@ -256,6 +259,10 @@ class _StartupGateState extends State<StartupGate> {
       await playerState.applySettings(appState.settings);
       // 下载状态初始化包含建目录、读索引、连 Connectivity 插件和扫描缓存，
       // 在 iOS 上要好几秒。它不影响进入主界面，先放后台跑，别卡住启动页。
+      //
+      // 但「不卡启动页」不等于「没准备好就开始播」：解析本地缓存文件依赖
+      // 这份索引，索引没读完时缓存好的章节会被当成未下载而走网络流。因此
+      // 让它与用户操作并行准备，玩家点播放时一般早已就绪。
       unawaited(downloadState.initialize().catchError((Object _) {
         // Downloads are recoverable local state; keep the app bootable.
       }));

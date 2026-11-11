@@ -84,7 +84,30 @@ class ClientUpdateService {
 
   Future<String> currentVersion() async => (await packageInfo()).version;
 
-  Future<String> currentVersionLabel() async => 'v${await currentVersion()}';
+  /// 构建号在启动时读一次缓存下来。
+  ///
+  /// 不能在要显示版本时才去问：`PackageInfo.fromPlatform()` 依赖平台通道，
+  /// 在拿不到实现的地方（例如组件测试）会一直不返回，把整个版本行拖成
+  /// 「未知」。启动时读一次，读取失败就当作没有构建号。
+  static String buildNumber = '';
+
+  /// 启动时调用，失败时静默留空。
+  static Future<void> loadBuildNumber() async {
+    try {
+      buildNumber = (await PackageInfo.fromPlatform()).buildNumber.trim();
+    } catch (_) {
+      buildNumber = '';
+    }
+  }
+
+  /// 带构建号的完整版本，例如 `v1.5.6 (59)`。
+  ///
+  /// 只看版本号无法区分「同一版本号重建的包」——排查问题时最需要的正是这一
+  /// 区别，所以把 pubspec 的 build number 一并显示出来。
+  Future<String> currentVersionLabel() async {
+    final version = await currentVersion();
+    return buildNumber.isEmpty ? 'v$version' : 'v$version ($buildNumber)';
+  }
 
   Future<ClientReleaseInfo?> fetchLatest() async {
     try {

@@ -294,6 +294,10 @@ class DownloadState extends ChangeNotifier {
 
   Future<String?> localPathForChapter(String chapterId) async {
     if (kIsWeb) return null;
+    // 下载索引是启动时后台加载的，播放很可能比它先到。不等这一步，缓存好
+    // 的章节会被当成「没下载」而走网络流，用户看到的就永远不是秒切。
+    await _initialization;
+    if (_disposed) return null;
     final key = _downloadKeyFor(chapterId);
     if (key == null) return null;
     return _localPathForDownloadKey(key);
