@@ -224,21 +224,25 @@ extension _PlayerSources on PlayerState {
   }) async {
     final authRevision = appState.api.authRevision;
     final headers = _streamHeaders;
-    final sources = <audio.AudioSource>[];
-    for (final chapter in chapterList) {
-      final embeddedLocalPath = _localFilePathFromChapter(chapter);
-      final localPath = embeddedLocalPath ??
-          await downloadState.localPathForChapter(chapter.id);
-      sources.add(
+    // 逐章串行 await 本地文件检查，整本书上千章时纯等待就要上百毫秒，
+    // 起播前这段等待用户能直接感觉到。这里一次并发问完。
+    final localPaths = await Future.wait([
+      for (final chapter in chapterList)
+        _localFilePathFromChapter(chapter) == null
+            ? downloadState.localPathForChapter(chapter.id)
+            : Future.value(_localFilePathFromChapter(chapter)),
+    ]);
+    final sources = <audio.AudioSource>[
+      for (var index = 0; index < chapterList.length; index++)
         audio.AudioSource.uri(
-          localPath == null
-              ? Uri.parse(streamUrl(chapter.id))
-              : Uri.file(localPath),
-          headers: localPath == null && headers.isNotEmpty ? headers : null,
-          tag: _mediaItemFor(book, chapter),
+          localPaths[index] == null
+              ? Uri.parse(streamUrl(chapterList[index].id))
+              : Uri.file(localPaths[index]!),
+          headers:
+              localPaths[index] == null && headers.isNotEmpty ? headers : null,
+          tag: _mediaItemFor(book, chapterList[index], index: index),
         ),
-      );
-    }
+    ];
     await _audio.setAudioSource(
       audio.ConcatenatingAudioSource(children: sources),
       initialIndex: initialIndex,
@@ -274,6 +278,7 @@ extension _PlayerSources on PlayerState {
     Book book,
     Chapter chapter, {
     double streamOffset = 0,
+    int? index,
   }) {
     final authorValue = book.author;
     final narratorValue = book.narrator;
@@ -291,7 +296,9 @@ extension _PlayerSources on PlayerState {
         : null;
     // iOS 依据 Now Playing 的队列信息决定耳机切歌手势是否可用，
     // 不上报时系统会把它当成单曲播放，右耳「下一曲」双击被直接丢弃。
-    final chapterIndex = chapters.indexWhere((item) => item.id == chapter.id);
+    // 建队列时调用方已知下标，传进来即可：整本书逐章 indexWhere 是 O(n²)。
+    final chapterIndex =
+        index ?? chapters.indexWhere((item) => item.id == chapter.id);
     return MediaItem(
       id: chapter.id,
       album: book.title,
