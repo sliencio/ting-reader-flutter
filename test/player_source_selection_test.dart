@@ -29,12 +29,14 @@ class _PlaybackApi extends ApiClient {
   Future<void>? progressGate;
   final responses = <String, dynamic>{};
   Future<void>? recentGate;
+  Future<void>? probeGate;
 
   @override
   Future<Response<dynamic>> get(String path,
       {Map<String, dynamic>? params, CancelToken? cancelToken}) async {
     sessionProbes.add(path);
     if (path == '/api/progress/recent') await recentGate;
+    if (path == '/api/me') await probeGate;
     return Response(
         requestOptions: RequestOptions(path: path),
         data: responses[path] ?? {},
@@ -1279,6 +1281,25 @@ void main() {
     });
   }
 
+  test('进度上传未完成时转码章节仍能自动续播', () async {
+    final first = chapter('/data/first.wma', id: 'first');
+    final second = chapter('/data/second.mp3', id: 'second', index: 1);
+    native.unsupportedChapterIds.add(first.id);
+    await player.playChapter(book, [first, second], first, startAt: 630);
+    final gate = Completer<void>();
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+    });
+    app.offlineMode = false;
+    app.api.progressGate = gate.future;
+    final before = app.api.progressUpdates.length;
+    native.emit(processingState: 4, position: const Duration(seconds: 636));
+    await waitForPlayback(() => app.api.progressUpdates.length > before);
+    await waitForPlayback(() => player.currentChapter?.id == second.id);
+    expect(player.isPlaying, isTrue);
+    gate.complete();
+  });
+
   test('WMA completion at the end of a book stops without reloading', () async {
     final item = chapter('/data/chapter.wma');
     native.unsupportedChapterIds.add(item.id);
@@ -1345,6 +1366,26 @@ void main() {
     expect(app.api.sessionProbes, contains('/api/me'));
     expect(player.isPlaying, isTrue);
     expect(player.error, isNull);
+  });
+
+  test('飞牛网关进度上传未完成时仍能自动续播', () async {
+    app.offlineMode = false;
+    app.api.isGatewaySession = () => true;
+    final first = chapter('/data/first.wma', id: 'first');
+    final second = chapter('/data/second.wma', id: 'second', index: 1);
+    native.unsupportedChapterIds.addAll([first.id, second.id]);
+    await player.playChapter(book, [first, second], first, startAt: 630);
+    final gate = Completer<void>();
+    addTearDown(() {
+      if (!gate.isCompleted) gate.complete();
+    });
+    app.api.progressGate = gate.future;
+    final before = app.api.progressUpdates.length;
+    native.emit(processingState: 4, position: const Duration(seconds: 636));
+    await waitForPlayback(() => app.api.progressUpdates.length > before);
+    await waitForPlayback(() => player.currentChapter?.id == second.id);
+    expect(player.isPlaying, isTrue);
+    gate.complete();
   });
 
   test('premature gateway WMA completion does not skip a chapter', () async {
@@ -1719,6 +1760,7 @@ void main() {
   test('a stale WMA completion cannot advance a manually selected chapter',
       () async {
     app.offlineMode = false;
+    app.api.isGatewaySession = () => true;
     final first = chapter('/data/first.wma', id: 'first');
     final second = chapter('/data/second.wma', id: 'second', index: 1);
     final third = chapter('/data/third.wma', id: 'third', index: 2);
@@ -1726,13 +1768,14 @@ void main() {
     native.unsupportedChapterIds.addAll(items.map((item) => item.id));
     await player.playChapter(book, items, first, startAt: 630);
     final gate = Completer<void>();
-    app.api.progressGate = gate.future;
+    app.api.probeGate = gate.future;
+    app.api.sessionProbes.clear();
     addTearDown(() {
       if (!gate.isCompleted) gate.complete();
     });
-    final progressCount = app.api.progressUpdates.length;
     native.emit(processingState: 4, position: const Duration(seconds: 636));
-    await waitForPlayback(() => app.api.progressUpdates.length > progressCount);
+    await waitForPlayback(() => app.api.sessionProbes.contains('/api/me'));
+    app.api.probeGate = null;
     await player.playChapter(book, items, second);
     gate.complete();
     await Future<void>.delayed(const Duration(milliseconds: 150));
@@ -1743,6 +1786,7 @@ void main() {
 
   test('repeated WMA completion events advance only one chapter', () async {
     app.offlineMode = false;
+    app.api.isGatewaySession = () => true;
     final first = chapter('/data/first.wma', id: 'first');
     final second = chapter('/data/second.wma', id: 'second', index: 1);
     final third = chapter('/data/third.wma', id: 'third', index: 2);
@@ -1750,13 +1794,13 @@ void main() {
     native.unsupportedChapterIds.addAll(items.map((item) => item.id));
     await player.playChapter(book, items, first, startAt: 630);
     final gate = Completer<void>();
-    app.api.progressGate = gate.future;
+    app.api.probeGate = gate.future;
+    app.api.sessionProbes.clear();
     addTearDown(() {
       if (!gate.isCompleted) gate.complete();
     });
-    final progressCount = app.api.progressUpdates.length;
     native.emit(processingState: 4, position: const Duration(seconds: 636));
-    await waitForPlayback(() => app.api.progressUpdates.length > progressCount);
+    await waitForPlayback(() => app.api.sessionProbes.contains('/api/me'));
     native.emit(processingState: 2);
     await Future<void>.delayed(Duration.zero);
     native.emit(processingState: 4, position: const Duration(seconds: 636));
@@ -1774,18 +1818,19 @@ void main() {
 
   test('pausing cancels an in-flight WMA chapter advance', () async {
     app.offlineMode = false;
+    app.api.isGatewaySession = () => true;
     final first = chapter('/data/first.wma', id: 'first');
     final second = chapter('/data/second.wma', id: 'second', index: 1);
     native.unsupportedChapterIds.addAll([first.id, second.id]);
     await player.playChapter(book, [first, second], first, startAt: 630);
     final gate = Completer<void>();
-    app.api.progressGate = gate.future;
+    app.api.probeGate = gate.future;
+    app.api.sessionProbes.clear();
     addTearDown(() {
       if (!gate.isCompleted) gate.complete();
     });
-    final progressCount = app.api.progressUpdates.length;
     native.emit(processingState: 4, position: const Duration(seconds: 636));
-    await waitForPlayback(() => app.api.progressUpdates.length > progressCount);
+    await waitForPlayback(() => app.api.sessionProbes.contains('/api/me'));
     final pause = player.togglePlay();
     await waitForPlayback(() => !player.isPlaying);
     gate.complete();
@@ -1799,18 +1844,19 @@ void main() {
 
   test('seeking cancels an in-flight WMA chapter advance', () async {
     app.offlineMode = false;
+    app.api.isGatewaySession = () => true;
     final first = chapter('/data/first.wma', id: 'first');
     final second = chapter('/data/second.wma', id: 'second', index: 1);
     native.unsupportedChapterIds.addAll([first.id, second.id]);
     await player.playChapter(book, [first, second], first, startAt: 630);
     final gate = Completer<void>();
-    app.api.progressGate = gate.future;
+    app.api.probeGate = gate.future;
+    app.api.sessionProbes.clear();
     addTearDown(() {
       if (!gate.isCompleted) gate.complete();
     });
-    final progressCount = app.api.progressUpdates.length;
     native.emit(processingState: 4, position: const Duration(seconds: 636));
-    await waitForPlayback(() => app.api.progressUpdates.length > progressCount);
+    await waitForPlayback(() => app.api.sessionProbes.contains('/api/me'));
     final seek = player.seek(20);
     await waitForPlayback(
         () => native.activeUri.queryParameters['seek'] == '20');

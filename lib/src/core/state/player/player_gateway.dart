@@ -195,7 +195,7 @@ extension _PlayerGateway on PlayerState {
 
       if (!_usesGatewaySingleChapterPlayback) {
         _resumeAfterGatewayReauthentication = false;
-        await sendProgress();
+        _sendCompletionProgressInBackground();
         shouldAdvance = shouldResume &&
             _audio.playing &&
             isActiveCompletion() &&
@@ -276,7 +276,7 @@ extension _PlayerGateway on PlayerState {
       }
 
       _resumeAfterGatewayReauthentication = false;
-      await sendProgress();
+      _sendCompletionProgressInBackground();
       if (!isActiveCompletion() ||
           _gatewayReauthenticationPending ||
           appState.needsGatewayLogin) {
@@ -294,6 +294,12 @@ extension _PlayerGateway on PlayerState {
         unawaited(nextChapter());
       }
     }
+  }
+
+  void _sendCompletionProgressInBackground() {
+    unawaited(sendProgress().catchError((Object failure) {
+      debugPrint('章节结束时同步进度失败：$failure');
+    }));
   }
 
   /// 等待进行中的 fnid 静默重登完成（无重登时立即返回）。
