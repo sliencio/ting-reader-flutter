@@ -50,11 +50,12 @@ extension _PlayerResume on PlayerState {
             .compareTo(DateTime.tryParse(a.updatedAt ?? '') ?? DateTime(1970)));
       if (recent.isEmpty) return;
       final latest = recent.first;
-      if (_progress.journal.hasPending(latest.bookId)) {
-        unawaited(_progress.journal.flush());
-        return;
-      }
       final updated = DateTime.tryParse(latest.updatedAt ?? '');
+      final pendingAt = _progress.journal.latestPendingAt(latest.bookId);
+      if (pendingAt != null) {
+        unawaited(_progress.journal.flush());
+        if (updated == null || !updated.isAfter(pendingAt)) return;
+      }
       if (cached != null &&
           (updated == null || !updated.isAfter(cached.updatedAt))) {
         return;

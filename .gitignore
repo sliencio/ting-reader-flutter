@@ -83,6 +83,7 @@ test/*
 !test/chapter_read_marks_test.dart
 !test/settings_push_layout_test.dart
 !test/listening_tools_test.dart
+!test/multi_device_progress_test.dart
 !test/session_recovery_test.dart
 !test/client_update_service_test.dart
 !test/about_page_test.dart

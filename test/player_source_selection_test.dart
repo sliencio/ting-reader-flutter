@@ -1901,6 +1901,8 @@ void main() {
         'position': 23.5,
         'duration': 636,
         'device_id': isNotEmpty,
+        'device_type': isNotEmpty,
+        'listened_at': isA<String>(),
       }
     ]);
   });

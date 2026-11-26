@@ -169,6 +169,15 @@ class _ReadingApi extends ApiClient {
             'position': 30,
             'duration': 120,
             'updated_at': '2026-09-30T00:00:00Z',
+            if (index == 0)
+              'devices': [
+                {'device_type': 'ios', 'updated_at': '2026-09-30T01:00:00Z'},
+                {
+                  'device_type': 'windows',
+                  'updated_at': '2026-09-30T00:30:00Z'
+                },
+                {'device_type': 'macos', 'updated_at': '2026-09-30T00:00:00Z'},
+              ],
           };
         }),
       });
@@ -1352,6 +1361,14 @@ void main() {
     await tester.tap(find.text('Large Book'));
     await tester.pumpAndSettle();
     expect(find.text('Chapter 0'), findsOneWidget);
+    expect(find.byIcon(Icons.phone_iphone_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.window_rounded), findsOneWidget);
+    expect(find.byIcon(Icons.laptop_mac_rounded), findsOneWidget);
+    expect(find.textContaining('iPhone / iPad · 2026-09-30'), findsOneWidget);
+    expect(find.textContaining('Windows · 2026-09-30'), findsOneWidget);
+    expect(find.textContaining('Mac · 2026-09-30'), findsOneWidget);
+    expect(find.textContaining('Unknown device ·'), findsWidgets);
+
     expect(find.text('Chapter 50'), findsNothing);
     final next = find.byTooltip('Next chapters');
     await tester.scrollUntilVisible(next, 400);

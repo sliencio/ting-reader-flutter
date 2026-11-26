@@ -29,6 +29,8 @@ class _PlayerProgress {
     identity: () =>
         '${appState.serverUrl}:${appState.fnId}:${appState.user?.id}',
     canSync: () => !_blocked,
+    onRemoteProgress: (value) =>
+        onRemotePosition(value.bookId, value.chapterId, value.position),
   );
 
   Future<void> record(_ProgressSnapshot value) =>
@@ -78,9 +80,7 @@ class _PlayerProgress {
     final value = snapshot();
     if (value != null) {
       await record(value);
-      if (!journal.conflicts.containsKey(value.book.id)) {
-        if (!await _sendWebSocket(value)) await _sendHttp(value);
-      }
+      if (!await _sendWebSocket(value)) await _sendHttp(value);
     }
   }
 
@@ -107,7 +107,6 @@ class _PlayerProgress {
 
   Future<bool> _sendWebSocket(_ProgressSnapshot value) async {
     if (kIsWeb || _blocked || (appState.token?.isEmpty ?? true)) return false;
-    if (journal.conflicts.containsKey(value.book.id)) return false;
     if (journal.syncing ||
         !journal.canSendRealtime(value.book.id, value.chapter.id)) {
       return false;
@@ -131,12 +130,16 @@ class _PlayerProgress {
           revision != appState.api.authRevision) {
         return false;
       }
+      final pending = journal.realtimeProgress(value.book.id, value.chapter.id);
+      if (pending == null) return false;
       socket.add(jsonEncode({
         'type': 'progress_update',
         'book_id': value.book.id,
         'chapter_id': value.chapter.id,
-        'position': value.position.floor(),
+        'position': pending.position.floor(),
         'device_id': journal.deviceId,
+        'device_type': journal.deviceType,
+        'listened_at': pending.updatedAt.toUtc().toIso8601String(),
       }));
       return true;
     } catch (error) {

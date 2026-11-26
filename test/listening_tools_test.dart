@@ -224,38 +224,42 @@ void main() {
     sync.dispose();
   });
 
-  test('恢复收听的新位置不能抹掉离线期间形成的同步冲突', () async {
+  test('本机最近的实际收听位置自动覆盖较早的其他设备进度', () async {
     final api = _SyncApi();
     final sync = ListeningProgressSync(
         api: api, identity: () => 'owner', canSync: () => true);
-    await sync.record(progress('a', 30,
-        at: DateTime.now().subtract(const Duration(hours: 2))));
-    api.remote['a'] = progress('a', 300,
-            at: DateTime.now().subtract(const Duration(hours: 1)))
-        .toJson();
-    await sync.record(progress('a', 35));
-    expect(await sync.prepareRealtime('a'), isFalse);
+    addTearDown(sync.dispose);
+    final now = DateTime.now();
+    await sync
+        .record(progress('a', 30, at: now.subtract(const Duration(hours: 2))));
+    api.remote['a'] =
+        progress('a', 300, at: now.subtract(const Duration(hours: 1))).toJson();
+    await sync.record(progress('a', 35, at: now));
+    expect(await sync.prepareRealtime('a'), isTrue);
     await sync.flush();
-    expect(api.uploaded, isEmpty);
-    expect(sync.conflicts.keys, ['a']);
-    sync.dispose();
+    expect(api.uploaded.single['position'], 35);
+    expect(sync.conflicts, isEmpty);
+    expect(sync.pendingCount, 0);
   });
 
-  test('新远端进度阻止离线旧进度覆盖，用户可选择保留本机', () async {
+  test('旧版服务端也会自动采用更新的远端位置，无需选择', () async {
     final api = _SyncApi();
     api.remote['a'] = {...progress('a', 300).toJson(), 'chapter_title': '第一章'};
+    ProgressItem? adopted;
     final sync = ListeningProgressSync(
-        api: api, identity: () => 'owner', canSync: () => true);
+        api: api,
+        identity: () => 'owner',
+        canSync: () => true,
+        onRemoteProgress: (value) => adopted = value);
+    addTearDown(sync.dispose);
     await sync.record(progress('a', 30,
         at: DateTime.now().subtract(const Duration(hours: 1))));
-    expect(await sync.prepareRealtime('a'), isFalse);
+    expect(await sync.prepareRealtime('a'), isTrue);
     await sync.flush();
     expect(api.uploaded, isEmpty);
-    expect(sync.conflicts.keys, ['a']);
-    await sync.resolve('a', useRemote: false);
-    expect(api.uploaded.single['position'], 30);
+    expect(sync.conflicts, isEmpty);
+    expect(adopted?.position, 300);
     expect(sync.pendingCount, 0);
-    sync.dispose();
   });
 
   test('采用其他设备进度会重新读取服务端并保留其他书籍的离线记录', () async {

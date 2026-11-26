@@ -116,22 +116,6 @@ class _ProgressSyncDialogState extends State<_ProgressSyncDialog> {
   bool _busy = false;
   String? _error;
   String? _notice;
-  Future<void> _run(Future<void> Function() action) async {
-    if (_busy) return;
-    setState(() {
-      _busy = true;
-      _error = null;
-      _notice = null;
-    });
-    try {
-      await action();
-    } catch (failure) {
-      if (mounted) setState(() => _error = ApiError.messageFor(failure));
-    } finally {
-      if (mounted) setState(() => _busy = false);
-    }
-  }
-
   Future<void> _syncNow() async {
     if (_busy) return;
     setState(() {
@@ -146,10 +130,6 @@ class _ProgressSyncDialogState extends State<_ProgressSyncDialog> {
         if (report.offline) {
           _notice = context.localeText('当前离线或未登录，进度已保存在本机，联网后自动补传',
               'Offline or signed out. Progress is saved on this device and uploads later');
-        } else if (report.conflicts > 0) {
-          _notice = context.localeText(
-              '已上传部分进度，还有 ${report.conflicts} 本书需要先选择保留哪个位置',
-              'Some progress uploaded. ${report.conflicts} books need you to choose which position to keep');
         } else if (report.error != null) {
           _error = context.localeText(
               '同步失败：${report.error}', 'Sync failed: ${report.error}');
@@ -183,33 +163,9 @@ class _ProgressSyncDialogState extends State<_ProgressSyncDialog> {
                       Text(context.localeText(
                           '本机待同步：${sync.pendingCount} 本书。离线收听进度会先保存在本机，联网后自动补传。',
                           '${sync.pendingCount} books pending. Offline progress is saved locally and uploaded when connected.')),
-                      for (final entry in sync.conflicts.entries) ...[
-                        const Divider(height: 28),
-                        Text(entry.key == player.currentBook?.id
-                            ? player.currentBook!.title
-                            : context.localeText('其他书籍的进度', 'Another book')),
-                        Text(context.localeText(
-                            '其他设备有较新的进度：${entry.value.chapterTitle ?? '另一章节'} ${formatDurationShort(entry.value.position)}。请选择要保留的位置。',
-                            'Another device has a newer position: ${entry.value.chapterTitle ?? 'chapter'} ${formatDurationShort(entry.value.position)}. Choose which position to keep.')),
-                        Wrap(spacing: 8, children: [
-                          TextButton(
-                              onPressed: _busy
-                                  ? null
-                                  : () => _run(() =>
-                                      player.resolveProgressConflict(entry.key,
-                                          useRemote: true)),
-                              child: Text(context.localeText(
-                                  '采用其他设备进度', 'Use other device'))),
-                          TextButton(
-                              onPressed: _busy
-                                  ? null
-                                  : () => _run(() =>
-                                      player.resolveProgressConflict(entry.key,
-                                          useRemote: false)),
-                              child: Text(context.localeText(
-                                  '保留本机进度', 'Keep this device'))),
-                        ]),
-                      ],
+                      const SizedBox(height: 8),
+                      Text(context.localeText('多设备自动使用最近收听的位置。',
+                          'Devices automatically use the most recently listened position.')),
                       if (_error != null)
                         Text(_error!,
                             style: TextStyle(
@@ -241,11 +197,10 @@ class PlaybackStatusNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = player.playbackStatus;
     final sync = player.progressSync;
-    final syncNotice = sync.conflicts.isNotEmpty ||
-        (sync.pendingCount > 0 &&
-            (player.appState.offlineMode ||
-                player.downloadState.network.offline ||
-                sync.error != null));
+    final syncNotice = sync.pendingCount > 0 &&
+        (player.appState.offlineMode ||
+            player.downloadState.network.offline ||
+            sync.error != null);
     if (status == null && !syncNotice) return const SizedBox.shrink();
     return Padding(
         padding: const EdgeInsets.only(top: 12),
@@ -274,17 +229,10 @@ class PlaybackStatusNotice extends StatelessWidget {
           if (syncNotice)
             TextButton.icon(
                 onPressed: () => showListeningSync(context, player),
-                icon: Icon(
-                    sync.conflicts.isNotEmpty
-                        ? Icons.sync_problem_rounded
-                        : Icons.cloud_off_outlined,
-                    size: 18),
+                icon: const Icon(Icons.cloud_off_outlined, size: 18),
                 label: Text(
-                    sync.conflicts.isNotEmpty
-                        ? context.localeText(
-                            '进度冲突，点击选择', 'Resolve progress conflict')
-                        : context.localeText('进度已保存在本机，等待同步',
-                            'Progress saved locally; sync pending'),
+                    context.localeText('进度已保存在本机，等待同步',
+                        'Progress saved locally; sync pending'),
                     style: const TextStyle(fontSize: 12))),
         ]));
   }

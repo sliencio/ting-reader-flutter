@@ -123,24 +123,20 @@ void main() {
     expect(third.loading, isFalse);
     expect(third.book?.title, 'Changed');
   });
-  test('GET 与 POST 之间发生并发更新时保留待同步，明确选本机后再写入', () async {
+  test('旧版服务端并发返回冲突后自动重试并采用更新的本机位置', () async {
     final api = _Api()..conflict = true;
     final sync = ListeningProgressSync(
         api: api, identity: () => 'owner', canSync: () => true);
     addTearDown(sync.dispose);
     await sync.record(_pending(20));
     await sync.flush();
-    expect(sync.pendingCount, 1);
-    expect(sync.conflicts['book']?.revision, 2);
-    expect(api.writes.single['base_revision'], 1);
-    expect(api.writes.single['device_id'], isNotEmpty);
-    await sync.resolve('book', useRemote: false);
     expect(sync.pendingCount, 0);
     expect(sync.conflicts, isEmpty);
-    expect(api.writes.last['base_revision'], 2);
+    expect(api.writes.map((item) => item['base_revision']), [1, 2]);
+    expect(api.writes.first['device_id'], isNotEmpty);
     expect(api.remote['position'], 20);
   });
-  test('重启后保留确认过的版本，服务器时间较旧也不能覆盖其他设备进度', () async {
+  test('重启后自动采用其他设备更晚的收听位置', () async {
     final api = _Api();
     ListeningProgressSync create() => ListeningProgressSync(
         api: api, identity: () => 'owner', canSync: () => true);
@@ -148,17 +144,20 @@ void main() {
     await first.record(_pending(20));
     await first.flush();
     first.dispose();
-    api.remote = {...api.remote, 'position': 80, 'revision': 8};
+    api.remote = {
+      ...api.remote,
+      'position': 80,
+      'revision': 8,
+      'updated_at': '2026-10-31T00:00:00Z'
+    };
     final second = create();
     addTearDown(second.dispose);
     await second.record(_pending(30));
     await second.flush();
     expect(api.writes.length, 1);
-    expect(second.pendingCount, 1);
-    expect(second.conflicts['book']?.position, 80);
-    final remote = await second.resolve('book', useRemote: true);
-    expect(remote?.revision, 8);
     expect(second.pendingCount, 0);
+    expect(second.conflicts, isEmpty);
+    expect(api.remote['position'], 80);
   });
   test('延迟到达的本机通知不能回退已确认版本', () async {
     final api = _Api();
@@ -222,8 +221,9 @@ void main() {
       await sync.observeRemote(api.remote, applyRemote: () => adopted);
       await sync.record(_pending(adopted ? 85 : 30));
       await sync.flush();
-      expect(sync.conflicts.isEmpty, adopted);
-      expect(sync.pendingCount, adopted ? 0 : 1);
+      expect(sync.conflicts, isEmpty);
+      expect(sync.pendingCount, 0);
+      expect(api.remote['position'], adopted ? 85 : 30);
     });
   }
 }

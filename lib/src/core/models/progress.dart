@@ -1,5 +1,14 @@
 import '_helpers.dart';
 
+class ProgressDevice {
+  const ProgressDevice({this.type, required this.updatedAt});
+  final String? type;
+  final String? updatedAt;
+  factory ProgressDevice.fromJson(Map<String, dynamic> json) => ProgressDevice(
+      type: readString(json, 'device_type'),
+      updatedAt: readString(json, 'updated_at'));
+}
+
 class ProgressItem {
   const ProgressItem({
     required this.id,
@@ -14,6 +23,8 @@ class ProgressItem {
     this.libraryId,
     this.chapterDuration,
     this.revision,
+    this.devices = const [],
+    this.latestWins = false,
   });
 
   final String id;
@@ -28,6 +39,8 @@ class ProgressItem {
   final String? libraryId;
   final int? chapterDuration;
   final int? revision;
+  final List<ProgressDevice> devices;
+  final bool latestWins;
 
   factory ProgressItem.fromJson(Map<String, dynamic> json) {
     return ProgressItem(
@@ -43,6 +56,11 @@ class ProgressItem {
       libraryId: readString(json, 'library_id'),
       chapterDuration: readInt(json, 'chapter_duration'),
       revision: readInt(json, 'revision'),
+      devices: (json['devices'] as List? ?? const [])
+          .whereType<Map<String, dynamic>>()
+          .map(ProgressDevice.fromJson)
+          .toList(),
+      latestWins: json['latest_wins'] == true,
     );
   }
 }

@@ -459,14 +459,23 @@ class _HistoryBookSection extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 14)),
                       const SizedBox(height: 6),
-                      Row(children: [
-                        Icon(Icons.access_time_rounded,
-                            size: 13, color: context.mutedText),
-                        const SizedBox(width: 5),
-                        Text(_displayDate(context, item.updatedAt),
-                            style: TextStyle(
-                                color: context.mutedText, fontSize: 12)),
-                      ]),
+                      for (final device in item.devices.isEmpty
+                          ? [ProgressDevice(updatedAt: item.updatedAt)]
+                          : item.devices)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 3),
+                          child: Row(children: [
+                            Icon(_deviceIcon(device.type),
+                                size: 14, color: context.mutedText),
+                            const SizedBox(width: 5),
+                            Expanded(
+                                child: Text(
+                                    '${_deviceLabel(context, device.type)} · ${_displayDate(context, device.updatedAt)}',
+                                    style: TextStyle(
+                                        color: context.mutedText,
+                                        fontSize: 12))),
+                          ]),
+                        ),
                       ActivityProgress(percent: _percent(item)),
                     ])),
               ]),
@@ -504,6 +513,26 @@ class _HistoryBookSection extends StatelessWidget {
     );
   }
 }
+
+IconData _deviceIcon(String? type) => switch (type) {
+      'ios' => Icons.phone_iphone_rounded,
+      'android' => Icons.phone_android_rounded,
+      'windows' => Icons.window_rounded,
+      'macos' => Icons.laptop_mac_rounded,
+      'linux' => Icons.computer_rounded,
+      'web' => Icons.language_rounded,
+      _ => Icons.devices_rounded,
+    };
+
+String _deviceLabel(BuildContext context, String? type) => switch (type) {
+      'ios' => 'iPhone / iPad',
+      'android' => 'Android',
+      'windows' => 'Windows',
+      'macos' => 'Mac',
+      'linux' => 'Linux',
+      'web' => context.localeText('浏览器', 'Browser'),
+      _ => context.localeText('未知设备', 'Unknown device'),
+    };
 
 String _displayDate(BuildContext context, String? value) {
   final date = backendDateTimeInApplicationTimeZone(
